@@ -65,6 +65,8 @@ Modules:
         ratio and prominence ratio);
     * pytta.loudspeaker:
         Thiele-Small parameters from the electrical impedance;
+    * pytta.sofa:
+        read and write SOFA files (AES69-2022) with impulse responses;
 
 .. toctree::
    classes/index
@@ -77,4 +79,5 @@ Modules:
    psychoacoustics
    ecma418
    loudspeaker
+   sofa
    properties

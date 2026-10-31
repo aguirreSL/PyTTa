@@ -130,6 +130,8 @@ from .functions import read_wav, write_wav, merge, split, \
     fft_convolve, find_delay, corr_coef, resample,\
     peak_time, save, load, plot_time, plot_time_dB, plot_freq,\
     plot_bars, plot_spectrogram, plot_waterfall, SPL, time_window, smooth_frequency, enhanced_spectrogram, minimum_phase, harmonic_distortion, sine_distortion, snr, plot_phase
+    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
+    group_delay, coherence, cepstrum, icepstrum, mls_deconvolution
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -182,6 +184,11 @@ __all__ = [  # Apps
            'enhanced_spectrogram',
            'smooth_frequency',
            'time_window',
+           'group_delay',
+           'coherence',
+           'cepstrum',
+           'icepstrum',
+           'mls_deconvolution',
            'save',
            'load',
            'weighting',

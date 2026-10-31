@@ -114,6 +114,7 @@ from . import iso717
 from . import bs1770
 from . import iec61672
 from . import descriptors
+from . import response
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -140,6 +141,7 @@ __all__ = [  # Apps
            'bs1770',
            'iec61672',
            'descriptors',
+           'response',
            'rooms',
 
            # Functions

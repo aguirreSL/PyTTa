@@ -63,6 +63,8 @@ Modules:
     * pytta.ecma418:
         prominent discrete tones according to ECMA-418-1 (tone-to-noise
         ratio and prominence ratio);
+    * pytta.loudspeaker:
+        Thiele-Small parameters from the electrical impedance;
 
 .. toctree::
    classes/index
@@ -74,4 +76,5 @@ Modules:
    iso3741
    psychoacoustics
    ecma418
+   loudspeaker
    properties

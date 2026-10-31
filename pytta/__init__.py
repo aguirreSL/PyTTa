@@ -78,6 +78,8 @@ Modules:
     * pytta.ecma418:
         prominent discrete tones according to ECMA-418-1 (tone-to-noise
         ratio and prominence ratio);
+    * pytta.loudspeaker:
+        Thiele-Small parameters from the electrical impedance;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -128,6 +130,7 @@ from . import iso9613
 from . import iso354
 from . import psychoacoustics
 from . import ecma418
+from . import loudspeaker
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -163,6 +166,7 @@ __all__ = [  # Apps
            'iso354',
            'psychoacoustics',
            'ecma418',
+           'loudspeaker',
            'rooms',
 
            # Functions

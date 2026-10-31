@@ -60,6 +60,9 @@ Modules:
     * pytta.psychoacoustics:
         loudness (ISO 532-1), sharpness (DIN 45692) and roughness (Daniel
         and Weber 1997) of a sound pressure signal;
+    * pytta.ecma418:
+        prominent discrete tones according to ECMA-418-1 (tone-to-noise
+        ratio and prominence ratio);
 
 .. toctree::
    classes/index
@@ -70,4 +73,5 @@ Modules:
    rooms
    iso3741
    psychoacoustics
+   ecma418
    properties

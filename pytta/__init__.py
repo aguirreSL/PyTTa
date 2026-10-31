@@ -75,6 +75,9 @@ Modules:
     * pytta.psychoacoustics:
         loudness (ISO 532-1), sharpness (DIN 45692) and roughness (Daniel
         and Weber 1997) of a sound pressure signal;
+    * pytta.ecma418:
+        prominent discrete tones according to ECMA-418-1 (tone-to-noise
+        ratio and prominence ratio);
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -124,6 +127,7 @@ from . import iso10534
 from . import iso9613
 from . import iso354
 from . import psychoacoustics
+from . import ecma418
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -158,6 +162,7 @@ __all__ = [  # Apps
            'iso9613',
            'iso354',
            'psychoacoustics',
+           'ecma418',
            'rooms',
 
            # Functions

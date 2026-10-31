@@ -108,6 +108,7 @@ from . import generate
 from . import utils
 from . import rooms
 from . import iso3741
+from . import iso3382
 from . import iso717
 
 from .functions import read_wav, write_wav, merge, split, \
@@ -148,6 +149,7 @@ __all__ = [  # Apps
            'resample',
            'corr_coef',
            'peak_time',
+           'iso3382',
            'snr',
            'sine_distortion',
            'harmonic_distortion',

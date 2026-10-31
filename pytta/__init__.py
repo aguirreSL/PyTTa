@@ -72,6 +72,10 @@ Modules:
     * pytta.iso3741:
         calculations according to the standard;
 
+    * pytta.psychoacoustics:
+        loudness (ISO 532-1), sharpness (DIN 45692) and roughness (Daniel
+        and Weber 1997) of a sound pressure signal;
+
 
 You can find usage examples in the toolbox's examples folder.
 
@@ -119,6 +123,7 @@ from . import vibration
 from . import iso10534
 from . import iso9613
 from . import iso354
+from . import psychoacoustics
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -150,6 +155,7 @@ __all__ = [  # Apps
            'iso10534',
            'iso9613',
            'iso354',
+           'psychoacoustics',
            'rooms',
 
            # Functions

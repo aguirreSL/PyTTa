@@ -111,6 +111,7 @@ from . import iso3741
 from . import iec60268
 from . import iso3382
 from . import iso717
+from . import bs1770
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -134,6 +135,7 @@ __all__ = [  # Apps
            'utils',
            'iso3741',
            'iso717',
+           'bs1770',
            'rooms',
 
            # Functions

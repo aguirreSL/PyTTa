@@ -116,7 +116,7 @@ from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
     fft_convolve, find_delay, corr_coef, resample,\
     peak_time, save, load, plot_time, plot_time_dB, plot_freq,\
-    plot_bars, plot_spectrogram, plot_waterfall, SPL, time_window, smooth_frequency, enhanced_spectrogram, minimum_phase, harmonic_distortion, sine_distortion, snr
+    plot_bars, plot_spectrogram, plot_waterfall, SPL, time_window, smooth_frequency, enhanced_spectrogram, minimum_phase, harmonic_distortion, sine_distortion, snr, plot_phase
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -150,6 +150,7 @@ __all__ = [  # Apps
            'resample',
            'corr_coef',
            'peak_time',
+           'plot_phase',
            'iec60268',
            'iso3382',
            'snr',

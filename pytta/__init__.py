@@ -108,6 +108,7 @@ from . import generate
 from . import utils
 from . import rooms
 from . import iso3741
+from . import iec60268
 from . import iso3382
 from . import iso717
 
@@ -149,6 +150,7 @@ __all__ = [  # Apps
            'resample',
            'corr_coef',
            'peak_time',
+           'iec60268',
            'iso3382',
            'snr',
            'sine_distortion',

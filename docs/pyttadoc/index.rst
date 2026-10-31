@@ -74,6 +74,9 @@ Modules:
 
     * pytta.ambisonics:
         higher-order Ambisonics encoding, decoding and rotation;
+        loudness (ISO 532-1), sharpness (DIN 45692), roughness (Daniel
+        and Weber 1997) and tonality (Aures 1985) of a sound pressure
+        signal;
 
 .. toctree::
    classes/index

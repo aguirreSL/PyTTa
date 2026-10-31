@@ -87,6 +87,9 @@ Modules:
     * pytta.vbap:
         vector base amplitude panning for 2D and 3D loudspeaker layouts;
 
+    * pytta.ambisonics:
+        higher-order Ambisonics encoding, decoding and rotation;
+
 
 You can find usage examples in the toolbox's examples folder.
 
@@ -140,6 +143,7 @@ from . import loudspeaker
 from . import sofa
 from . import din45681
 from . import vbap
+from . import ambisonics
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -179,6 +183,7 @@ __all__ = [  # Apps
            'sofa',
            'din45681',
            'vbap',
+           'ambisonics',
            'rooms',
 
            # Functions

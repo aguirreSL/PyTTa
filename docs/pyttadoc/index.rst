@@ -72,6 +72,9 @@ Modules:
     * pytta.vbap:
         vector base amplitude panning for 2D and 3D loudspeaker layouts;
 
+    * pytta.ambisonics:
+        higher-order Ambisonics encoding, decoding and rotation;
+
 .. toctree::
    classes/index
    utils/index
@@ -86,4 +89,5 @@ Modules:
    sofa
    din45681
    vbap
+   ambisonics
    properties

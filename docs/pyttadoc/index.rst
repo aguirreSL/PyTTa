@@ -69,6 +69,8 @@ Modules:
         read and write SOFA files (AES69-2022) with impulse responses;
     * pytta.din45681:
         tonal audibility of tones in noise (DIN 45681);
+    * pytta.vbap:
+        vector base amplitude panning for 2D and 3D loudspeaker layouts;
 
 .. toctree::
    classes/index
@@ -83,4 +85,5 @@ Modules:
    loudspeaker
    sofa
    din45681
+   vbap
    properties

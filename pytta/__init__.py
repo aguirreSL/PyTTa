@@ -82,6 +82,8 @@ Modules:
         Thiele-Small parameters from the electrical impedance;
     * pytta.sofa:
         read and write SOFA files (AES69-2022) with impulse responses;
+    * pytta.din45681:
+        tonal audibility of tones in noise (DIN 45681);
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -134,6 +136,7 @@ from . import psychoacoustics
 from . import ecma418
 from . import loudspeaker
 from . import sofa
+from . import din45681
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -171,6 +174,7 @@ __all__ = [  # Apps
            'ecma418',
            'loudspeaker',
            'sofa',
+           'din45681',
            'rooms',
 
            # Functions

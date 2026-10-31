@@ -67,6 +67,8 @@ Modules:
         Thiele-Small parameters from the electrical impedance;
     * pytta.sofa:
         read and write SOFA files (AES69-2022) with impulse responses;
+    * pytta.din45681:
+        tonal audibility of tones in noise (DIN 45681);
 
 .. toctree::
    classes/index
@@ -80,4 +82,5 @@ Modules:
    ecma418
    loudspeaker
    sofa
+   din45681
    properties

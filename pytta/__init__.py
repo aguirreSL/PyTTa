@@ -111,6 +111,8 @@ Modules:
         meshes for finite and boundary elements;
     * pytta.iso11654:
         rating of sound absorption (ISO 11654);
+    * pytta.iso3382_3:
+        open-plan offices (ISO 3382-3);
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -176,6 +178,7 @@ from . import bem
 from . import rays
 from . import mesh
 from . import iso11654
+from . import iso3382_3
 
 from .functions import (
     read_wav, write_wav, merge, split, list_devices, print_devices,
@@ -237,6 +240,7 @@ __all__ = [  # Apps
            'rays',
            'mesh',
            'iso11654',
+           'iso3382_3',
            'rooms',
 
            # Functions

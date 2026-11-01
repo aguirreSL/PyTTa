@@ -157,6 +157,9 @@ from .functions import read_wav, write_wav, merge, split, \
     peak_time, save, load, plot_time, plot_time_dB, plot_freq,\
     plot_bars, plot_spectrogram, plot_waterfall, SPL, time_window, smooth_frequency, enhanced_spectrogram, minimum_phase, harmonic_distortion, sine_distortion, snr, plot_phase,\
     group_delay, coherence, cepstrum, icepstrum, mls_deconvolution
+    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
+    envelope, start_ir, time_shift, append, normalize, amplify_to,\
+    zero_phase, randomize_phase, quantize
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -221,6 +224,15 @@ __all__ = [  # Apps
            'cepstrum',
            'icepstrum',
            'mls_deconvolution',
+           'envelope',
+           'start_ir',
+           'time_shift',
+           'append',
+           'normalize',
+           'amplify_to',
+           'zero_phase',
+           'randomize_phase',
+           'quantize',
            'save',
            'load',
            'weighting',

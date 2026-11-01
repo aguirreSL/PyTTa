@@ -105,4 +105,5 @@ Modules:
    fem
    bem
    rays
+   mesh
    properties

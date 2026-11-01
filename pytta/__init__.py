@@ -107,6 +107,8 @@ Modules:
         boundary elements for radiation into free field;
     * pytta.rays:
         stochastic ray tracing in convex rooms;
+    * pytta.mesh:
+        meshes for finite and boundary elements;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -170,6 +172,7 @@ from . import e2611
 from . import fem
 from . import bem
 from . import rays
+from . import mesh
 
 from .functions import (
     read_wav, write_wav, merge, split, list_devices, print_devices,
@@ -229,6 +232,7 @@ __all__ = [  # Apps
            'fem',
            'bem',
            'rays',
+           'mesh',
            'rooms',
 
            # Functions

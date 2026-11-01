@@ -76,3 +76,6 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.multiple_sweep_excitation
 .. autofunction:: pytta.multiple_sweep_irs
 .. autofunction:: pytta.triggered_average
+.. autofunction:: pytta.pitch_detection
+.. autofunction:: pytta.wiener_hopf
+.. autofunction:: pytta.normxcorr2

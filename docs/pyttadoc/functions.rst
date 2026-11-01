@@ -62,3 +62,5 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.plot_nyquist
 .. autofunction:: pytta.plot_zplane
 .. autofunction:: pytta.plot_polar
+.. autofunction:: pytta.power_to_harmonic_series
+.. autofunction:: pytta.harmonic_to_power_series

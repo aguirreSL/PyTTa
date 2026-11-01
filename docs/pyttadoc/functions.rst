@@ -66,3 +66,6 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.harmonic_to_power_series
 .. autofunction:: pytta.prony
 .. autofunction:: pytta.invfreqz
+.. autofunction:: pytta.bark_warping
+.. autofunction:: pytta.warp
+.. autofunction:: pytta.warp_zpk

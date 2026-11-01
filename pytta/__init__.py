@@ -184,6 +184,8 @@ from .functions import read_wav, write_wav, merge, split, \
     power_to_harmonic_series, harmonic_to_power_series
     plot_bars, plot_spectrogram, plot_waterfall, SPL,\
     prony, invfreqz
+    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
+    bark_warping, warp, warp_zpk
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -282,6 +284,9 @@ __all__ = [  # Apps
            'harmonic_to_power_series',
            'prony',
            'invfreqz',
+           'bark_warping',
+           'warp',
+           'warp_zpk',
            'save',
            'load',
            'weighting',

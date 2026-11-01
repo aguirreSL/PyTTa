@@ -103,4 +103,5 @@ Modules:
    fourpole
    e2611
    fem
+   bem
    properties

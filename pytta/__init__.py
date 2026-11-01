@@ -103,6 +103,8 @@ Modules:
         (ASTM E2611);
     * pytta.fem:
         finite elements for the Helmholtz equation in air;
+    * pytta.bem:
+        boundary elements for radiation into free field;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -164,6 +166,7 @@ from . import analytic
 from . import fourpole
 from . import e2611
 from . import fem
+from . import bem
 
 from .functions import (
     read_wav, write_wav, merge, split, list_devices, print_devices,
@@ -229,6 +232,7 @@ __all__ = [  # Apps
            'fourpole',
            'e2611',
            'fem',
+           'bem',
            'rooms',
 
            # Functions

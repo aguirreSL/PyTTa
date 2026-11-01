@@ -94,6 +94,8 @@ Modules:
         tonality (Aures 1985) of a sound pressure signal;
     * pytta.iso532_2:
         loudness of stationary sounds by the Moore-Glasberg method (ISO 532-2);
+    * pytta.absorbers:
+        surface impedance and absorption of layered absorbers;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -150,6 +152,7 @@ from . import din45681
 from . import vbap
 from . import ambisonics
 from . import iso532_2
+from . import absorbers
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -197,6 +200,7 @@ __all__ = [  # Apps
            'vbap',
            'ambisonics',
            'iso532_2',
+           'absorbers',
            'rooms',
 
            # Functions

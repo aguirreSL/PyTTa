@@ -79,6 +79,8 @@ Modules:
         tonality (Aures 1985) of a sound pressure signal;
     * pytta.iso532_2:
         loudness of stationary sounds by the Moore-Glasberg method (ISO 532-2);
+    * pytta.absorbers:
+        surface impedance and absorption of layered absorbers;
 
 .. toctree::
    classes/index
@@ -96,4 +98,5 @@ Modules:
    vbap
    ambisonics
    iso532_2
+   absorbers
    properties

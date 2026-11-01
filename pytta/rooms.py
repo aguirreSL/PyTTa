@@ -22,12 +22,12 @@ Available functions:
     >>> pytta.rooms.strength_factor(...)
     >>> pytta.rooms.G_Lpe
     >>> pytta.rooms.G_Lps
+    >>> pytta.rooms.image_source_ir(dimensions, source, receiver, fs, duration)
+    >>> pytta.rooms.rectangular_room_frf(dimensions, source, receiver, freqs, T)
+    >>> pytta.rooms.rectangular_room_ir(dimensions, source, receiver, fs, nSamples, T)
     >>> pytta.rooms.air_constants(temperature, humidity, pressure)
     >>> pytta.rooms.convert_room_quantity(value, 'T', 'alpha', volume, surface)
     >>> pytta.rooms.din18041(volume, purpose)
-    >>> pytta.rooms.rectangular_room_frf(dimensions, source, receiver, freqs, T)
-    >>> pytta.rooms.rectangular_room_ir(dimensions, source, receiver, fs, nSamples, T)
-    >>> pytta.rooms.image_source_ir(dimensions, source, receiver, fs, duration)
 
 Authors:
     João Vitor Gutkoski Paes, joao.paes@eac.ufsm.br
@@ -382,6 +382,167 @@ def analyse(obj, *params,
     return result
 
 
+def image_source_ir(dimensions, source, receiver, samplingRate, duration,
+                    reflection=1., c=343.2, half_width=8):
+    """
+    Impulse response of a rectangular room by the image source method of
+    Allen and Berkley (1979), as ita_roomacoustics_imagesources: the free
+    field Green's function delta(t - d/c) / (4 pi d) of every image source
+    within duration, weighted by the reflection factors of the walls it
+    goes through.
+
+    Parameters
+    ----------
+    dimensions, source, receiver : array_like
+        (Lx, Ly, Lz) and the positions (m), with 0 <= x <= Lx.
+    samplingRate : int
+    duration : float
+        Length of the response (s); image sources farther than c duration
+        are left out.
+    reflection : float or array_like
+        Pressure reflection factor of every wall, or six of them for the
+        walls x = 0, x = Lx, y = 0, y = Ly, z = 0, z = Lz (frequency and
+        angle independent; ita_roomacoustics_imagesources derives them
+        from a wall impedance Z as (Z - rho c) / (Z + rho c)). Default 1.
+    half_width : int
+        Half length in samples of the Hann-windowed sinc that places each
+        arrival between samples. Default 8.
+
+    Returns
+    -------
+    SignalObj
+        The response; convolved with rho dQ/dt of the source (Q the volume
+        velocity) it gives the pressure.
+    """
+    from pytta.classes import SignalObj
+    L = np.asarray(dimensions, dtype=float)
+    r0, r = np.asarray(source, dtype=float), np.asarray(receiver, dtype=float)
+    if np.any(r0 < 0) or np.any(r0 > L) or np.any(r < 0) or np.any(r > L):
+        raise ValueError('source and receiver must lie inside the room.')
+    beta = np.broadcast_to(np.asarray(reflection, dtype=float), (6,))
+    n = int(round(duration * samplingRate))
+    out = np.zeros(n + 2 * half_width + 1)
+    reach = c * duration
+    lmax = [int(np.ceil(reach / (2 * L[i]))) + 1 for i in range(3)]
+    k = np.arange(-half_width, half_width + 1)
+    # per axis: image coordinates, distances and reflection weights of
+    # x = 2 l Lx + (1 - 2u) x0 (u = 0, 1): |l - u| reflections at x = 0 and
+    # |l| at x = Lx
+    axes = []
+    for i in range(3):
+        ls = np.arange(-lmax[i], lmax[i] + 1)
+        coord, weight = [], []
+        for u in (0, 1):
+            coord.append(2 * ls * L[i] + (1 - 2 * u) * r0[i] - r[i])
+            weight.append(beta[2 * i] ** np.abs(ls - u) * beta[2 * i + 1] ** np.abs(ls))
+        axes.append((np.concatenate(coord), np.concatenate(weight)))
+    (dx, wx), (dy, wy), (dz, wz) = axes
+    d2xy = dx[:, None] ** 2 + dy[None, :] ** 2
+    wxy = wx[:, None] * wy[None, :]
+    for z, w in zip(dz, wz):
+        d = np.sqrt(d2xy + z ** 2).ravel()
+        keep = d <= reach
+        if not np.any(keep):
+            continue
+        d, a = d[keep], (wxy.ravel() * w)[keep] / (4 * np.pi * d[keep])
+        t = d / c * samplingRate
+        i0 = np.floor(t).astype(int)
+        frac = t - i0
+        x = k[None, :] - frac[:, None]
+        kernel = np.sinc(x) * 0.5 * (1 + np.cos(np.pi * x / (half_width + 1)))
+        idx = i0[:, None] + k[None, :] + half_width
+        np.add.at(out, idx.ravel(), (a[:, None] * kernel).ravel())
+    return SignalObj(out[half_width:half_width + n], 'time', samplingRate,
+                     signalType='energy')
+
+def _room_modes(dimensions, f_max, c):
+    """Mode numbers (n, 3) and frequencies of a rigid rectangular room up to f_max."""
+    L = np.asarray(dimensions, dtype=float)
+    kmax = 2 * f_max / c
+    nx = np.arange(int(np.floor(kmax * L[0])) + 1)
+    ny = np.arange(int(np.floor(kmax * L[1])) + 1)
+    nz = np.arange(int(np.floor(kmax * L[2])) + 1)
+    n = np.stack(np.meshgrid(nx, ny, nz, indexing='ij'), -1).reshape(-1, 3)
+    f = c / 2 * np.sqrt(np.sum((n / L) ** 2, axis=1))
+    keep = f <= f_max
+    return n[keep], f[keep]
+
+
+def rectangular_room_frf(dimensions, source, receiver, frequencies, T=2.,
+                         f_max=None, c=343.2, rho=1.204):
+    """
+    Transfer function p / Q (Pa per m^3/s) from a point source of volume
+    velocity Q to a receiver in a rectangular room with rigid walls and
+    uniform modal damping, by modal superposition (Fahy, Foundations of
+    Engineering Acoustics, 9.8; Kuttruff, Room Acoustics, chapter 3), as
+    ita_roomacoustics_analytic_FRF:
+
+        H = j w rho c^2 sum_N psi_N(r) psi_N(r0) / (L_N (w_N^2 - w^2 + 2 j d w))
+
+    with psi_N = cos(nx pi x / Lx) cos(ny pi y / Ly) cos(nz pi z / Lz),
+    L_N = V prod(1 for n = 0, 1/2 otherwise), w_N = pi c sqrt(sum (n/L)^2)
+    and d = 3 ln(10) / T for every mode. Time dependence exp(j w t), the
+    convention of numpy.fft, so the impulse response is causal.
+
+    Parameters
+    ----------
+    dimensions, source, receiver : array_like
+        (Lx, Ly, Lz) of the room and the positions (m), with 0 <= x <= Lx.
+    frequencies : array_like
+        Frequencies (Hz).
+    T : float
+        Reverberation time (s) that sets the damping. Default 2.
+    f_max : float, optional
+        Highest mode frequency; by default 1.2 times the highest frequency.
+    """
+    L = np.asarray(dimensions, dtype=float)
+    r0, r = np.asarray(source, dtype=float), np.asarray(receiver, dtype=float)
+    if np.any(r0 < 0) or np.any(r0 > L) or np.any(r < 0) or np.any(r > L):
+        raise ValueError('source and receiver must lie inside the room.')
+    f = np.asarray(frequencies, dtype=float)
+    f_max = 1.2 * np.max(f) if f_max is None else f_max
+    n, fn = _room_modes(L, f_max, c)
+    psi = np.prod(np.cos(np.pi * n * r0 / L), axis=1) * np.prod(np.cos(np.pi * n * r / L), axis=1)
+    lam = np.prod(L) * 0.5 ** np.sum(n > 0, axis=1)
+    delta = 3 * np.log(10) / T
+    # the (0, 0, 0) mode in closed form, rho c^2 / (V (2 d + j w)), finite at
+    # f = 0 (the compression of the whole volume); the other modes vanish there
+    w = 2 * np.pi * f
+    H = rho * c ** 2 / (np.prod(L) * (2 * delta + 1j * w))
+    rest = np.any(n > 0, axis=1)
+    wn2, a = (2 * np.pi * fn[rest]) ** 2, (psi / lam)[rest]
+    step = max(1, 2_000_000 // max(1, a.size))       # bounds the memory per block
+    for k in range(0, f.size, step):
+        wk = w[k:k + step, None]
+        H[k:k + step] += 1j * wk[:, 0] * rho * c ** 2 * np.sum(
+            a / (wn2 - wk ** 2 + 2j * delta * wk), axis=1)
+    return H
+
+
+def rectangular_room_ir(dimensions, source, receiver, samplingRate, numSamples,
+                        T=2., f_max=None, c=343.2, rho=1.204):
+    """
+    Impulse response of rectangular_room_frf at the FFT bins of numSamples
+    samples, as a SignalObj, so that its convolution with the volume
+    velocity gives the pressure.
+
+    The modal sum is band-limited: modes up to f_max (0.4 samplingRate by
+    default) and a raised-cosine fade of the response from f_max to
+    samplingRate / 2. Cutting the response where it is large, at the
+    Nyquist frequency, would ring through the whole circular response. The
+    band-limited direct sound still rings a little before it arrives; the
+    part before t = 0 wraps to the last samples of the circular response.
+    """
+    from pytta.classes import SignalObj
+    f = np.fft.rfftfreq(numSamples, 1 / samplingRate)
+    f_max = 0.4 * samplingRate if f_max is None else f_max
+    H = rectangular_room_frf(dimensions, source, receiver, f, T, f_max, c, rho)
+    nyq = samplingRate / 2
+    fade = np.clip((f - f_max) / max(nyq - f_max, 1e-12), 0, 1)
+    H = H * 0.5 * (1 + np.cos(np.pi * fade))
+    return SignalObj(np.fft.irfft(H, numSamples), 'time', samplingRate,
+                     signalType='energy')
+
 def air_constants(temperature=20., humidity=0.5, pressure=101325.):
     """
     Speed of sound, density and characteristic impedance of humid air, as
@@ -518,153 +679,3 @@ def din18041(volume, purpose='speech', frequencies=None):
         hi = np.full(f.size, 1.2)
     return {'T_soll': float(T), 'frequency': f,
             'T_min': np.maximum(lo * T, 1e-6), 'T_max': np.maximum(hi * T, 1e-6)}
-def _room_modes(dimensions, f_max, c):
-    """Mode numbers (n, 3) and frequencies of a rigid rectangular room up to f_max."""
-    L = np.asarray(dimensions, dtype=float)
-    kmax = 2 * f_max / c
-    nx = np.arange(int(np.floor(kmax * L[0])) + 1)
-    ny = np.arange(int(np.floor(kmax * L[1])) + 1)
-    nz = np.arange(int(np.floor(kmax * L[2])) + 1)
-    n = np.stack(np.meshgrid(nx, ny, nz, indexing='ij'), -1).reshape(-1, 3)
-    f = c / 2 * np.sqrt(np.sum((n / L) ** 2, axis=1))
-    keep = f <= f_max
-    return n[keep], f[keep]
-
-
-def rectangular_room_frf(dimensions, source, receiver, frequencies, T=2.,
-                         f_max=None, c=343.2, rho=1.204):
-    """
-    Transfer function p / Q (Pa per m^3/s) from a point source of volume
-    velocity Q to a receiver in a rectangular room with rigid walls and
-    uniform modal damping, by modal superposition (Fahy, Foundations of
-    Engineering Acoustics, 9.8; Kuttruff, Room Acoustics, chapter 3), as
-    ita_roomacoustics_analytic_FRF:
-
-        H = j w rho c^2 sum_N psi_N(r) psi_N(r0) / (L_N (w_N^2 - w^2 + 2 j d w))
-
-    with psi_N = cos(nx pi x / Lx) cos(ny pi y / Ly) cos(nz pi z / Lz),
-    L_N = V prod(1 for n = 0, 1/2 otherwise), w_N = pi c sqrt(sum (n/L)^2)
-    and d = 3 ln(10) / T for every mode. Time dependence exp(j w t), the
-    convention of numpy.fft, so the impulse response is causal.
-def image_source_ir(dimensions, source, receiver, samplingRate, duration,
-                    reflection=1., c=343.2, half_width=8):
-    """
-    Impulse response of a rectangular room by the image source method of
-    Allen and Berkley (1979), as ita_roomacoustics_imagesources: the free
-    field Green's function delta(t - d/c) / (4 pi d) of every image source
-    within duration, weighted by the reflection factors of the walls it
-    goes through.
-
-    Parameters
-    ----------
-    dimensions, source, receiver : array_like
-        (Lx, Ly, Lz) of the room and the positions (m), with 0 <= x <= Lx.
-    frequencies : array_like
-        Frequencies (Hz).
-    T : float
-        Reverberation time (s) that sets the damping. Default 2.
-    f_max : float, optional
-        Highest mode frequency; by default 1.2 times the highest frequency.
-    """
-        (Lx, Ly, Lz) and the positions (m), with 0 <= x <= Lx.
-    samplingRate : int
-    duration : float
-        Length of the response (s); image sources farther than c duration
-        are left out.
-    reflection : float or array_like
-        Pressure reflection factor of every wall, or six of them for the
-        walls x = 0, x = Lx, y = 0, y = Ly, z = 0, z = Lz (frequency and
-        angle independent; ita_roomacoustics_imagesources derives them
-        from a wall impedance Z as (Z - rho c) / (Z + rho c)). Default 1.
-    half_width : int
-        Half length in samples of the Hann-windowed sinc that places each
-        arrival between samples. Default 8.
-
-    Returns
-    -------
-    SignalObj
-        The response; convolved with rho dQ/dt of the source (Q the volume
-        velocity) it gives the pressure.
-    """
-    from pytta.classes import SignalObj
-    L = np.asarray(dimensions, dtype=float)
-    r0, r = np.asarray(source, dtype=float), np.asarray(receiver, dtype=float)
-    if np.any(r0 < 0) or np.any(r0 > L) or np.any(r < 0) or np.any(r > L):
-        raise ValueError('source and receiver must lie inside the room.')
-    f = np.asarray(frequencies, dtype=float)
-    f_max = 1.2 * np.max(f) if f_max is None else f_max
-    n, fn = _room_modes(L, f_max, c)
-    psi = np.prod(np.cos(np.pi * n * r0 / L), axis=1) * np.prod(np.cos(np.pi * n * r / L), axis=1)
-    lam = np.prod(L) * 0.5 ** np.sum(n > 0, axis=1)
-    delta = 3 * np.log(10) / T
-    # the (0, 0, 0) mode in closed form, rho c^2 / (V (2 d + j w)), finite at
-    # f = 0 (the compression of the whole volume); the other modes vanish there
-    w = 2 * np.pi * f
-    H = rho * c ** 2 / (np.prod(L) * (2 * delta + 1j * w))
-    rest = np.any(n > 0, axis=1)
-    wn2, a = (2 * np.pi * fn[rest]) ** 2, (psi / lam)[rest]
-    step = max(1, 2_000_000 // max(1, a.size))       # bounds the memory per block
-    for k in range(0, f.size, step):
-        wk = w[k:k + step, None]
-        H[k:k + step] += 1j * wk[:, 0] * rho * c ** 2 * np.sum(
-            a / (wn2 - wk ** 2 + 2j * delta * wk), axis=1)
-    return H
-
-
-def rectangular_room_ir(dimensions, source, receiver, samplingRate, numSamples,
-                        T=2., f_max=None, c=343.2, rho=1.204):
-    """
-    Impulse response of rectangular_room_frf at the FFT bins of numSamples
-    samples, as a SignalObj, so that its convolution with the volume
-    velocity gives the pressure.
-
-    The modal sum is band-limited: modes up to f_max (0.4 samplingRate by
-    default) and a raised-cosine fade of the response from f_max to
-    samplingRate / 2. Cutting the response where it is large, at the
-    Nyquist frequency, would ring through the whole circular response. The
-    band-limited direct sound still rings a little before it arrives; the
-    part before t = 0 wraps to the last samples of the circular response.
-    """
-    from pytta.classes import SignalObj
-    f = np.fft.rfftfreq(numSamples, 1 / samplingRate)
-    f_max = 0.4 * samplingRate if f_max is None else f_max
-    H = rectangular_room_frf(dimensions, source, receiver, f, T, f_max, c, rho)
-    nyq = samplingRate / 2
-    fade = np.clip((f - f_max) / max(nyq - f_max, 1e-12), 0, 1)
-    H = H * 0.5 * (1 + np.cos(np.pi * fade))
-    return SignalObj(np.fft.irfft(H, numSamples), 'time', samplingRate,
-    beta = np.broadcast_to(np.asarray(reflection, dtype=float), (6,))
-    n = int(round(duration * samplingRate))
-    out = np.zeros(n + 2 * half_width + 1)
-    reach = c * duration
-    lmax = [int(np.ceil(reach / (2 * L[i]))) + 1 for i in range(3)]
-    k = np.arange(-half_width, half_width + 1)
-    # per axis: image coordinates, distances and reflection weights of
-    # x = 2 l Lx + (1 - 2u) x0 (u = 0, 1): |l - u| reflections at x = 0 and
-    # |l| at x = Lx
-    axes = []
-    for i in range(3):
-        ls = np.arange(-lmax[i], lmax[i] + 1)
-        coord, weight = [], []
-        for u in (0, 1):
-            coord.append(2 * ls * L[i] + (1 - 2 * u) * r0[i] - r[i])
-            weight.append(beta[2 * i] ** np.abs(ls - u) * beta[2 * i + 1] ** np.abs(ls))
-        axes.append((np.concatenate(coord), np.concatenate(weight)))
-    (dx, wx), (dy, wy), (dz, wz) = axes
-    d2xy = dx[:, None] ** 2 + dy[None, :] ** 2
-    wxy = wx[:, None] * wy[None, :]
-    for z, w in zip(dz, wz):
-        d = np.sqrt(d2xy + z ** 2).ravel()
-        keep = d <= reach
-        if not np.any(keep):
-            continue
-        d, a = d[keep], (wxy.ravel() * w)[keep] / (4 * np.pi * d[keep])
-        t = d / c * samplingRate
-        i0 = np.floor(t).astype(int)
-        frac = t - i0
-        x = k[None, :] - frac[:, None]
-        kernel = np.sinc(x) * 0.5 * (1 + np.cos(np.pi * x / (half_width + 1)))
-        idx = i0[:, None] + k[None, :] + half_width
-        np.add.at(out, idx.ravel(), (a[:, None] * kernel).ravel())
-    return SignalObj(out[half_width:half_width + n], 'time', samplingRate,
-                     signalType='energy')

@@ -73,8 +73,9 @@ Modules:
         calculations according to the standard;
 
     * pytta.psychoacoustics:
-        loudness (ISO 532-1), sharpness (DIN 45692) and roughness (Daniel
-        and Weber 1997) of a sound pressure signal;
+        loudness (ISO 532-1), sharpness (DIN 45692), roughness (Daniel
+        and Weber 1997), fluctuation strength (Osses et al. 2016) and
+        tonality (Aures 1985) of a sound pressure signal;
     * pytta.ecma418:
         prominent discrete tones according to ECMA-418-1 (tone-to-noise
         ratio and prominence ratio);
@@ -89,9 +90,6 @@ Modules:
 
     * pytta.ambisonics:
         higher-order Ambisonics encoding, decoding and rotation;
-        loudness (ISO 532-1), sharpness (DIN 45692), roughness (Daniel
-        and Weber 1997), fluctuation strength (Osses et al. 2016) and
-        tonality (Aures 1985) of a sound pressure signal;
     * pytta.iso532_2:
         loudness of stationary sounds by the Moore-Glasberg method (ISO 532-2);
     * pytta.absorbers:
@@ -160,32 +158,20 @@ from . import absorbers
 from . import analytic
 from . import fourpole
 
-from .functions import read_wav, write_wav, merge, split, \
-    list_devices, print_devices, get_device_from_user,\
-    fft_convolve, find_delay, corr_coef, resample,\
-    peak_time, save, load, plot_time, plot_time_dB, plot_freq,\
-    plot_bars, plot_spectrogram, plot_waterfall, SPL, time_window, smooth_frequency, enhanced_spectrogram, minimum_phase, harmonic_distortion, sine_distortion, snr, plot_phase,\
-    group_delay, coherence, cepstrum, icepstrum, mls_deconvolution
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    envelope, start_ir, time_shift, append, normalize, amplify_to,\
-    zero_phase, randomize_phase, quantize
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    butterworth, notch, peak_eq
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    psd, interpolate_spectrum, extrapolate_low
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    read_audio, write_audio, read_blockwise, write_txt, read_txt
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    crossfade_spectra, cut_impulse_train, velocity_from_pressure_gradient
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    group_delay, coherence, cepstrum, icepstrum, mls_deconvolution,\
-    plot_group_delay, plot_nyquist, plot_zplane, plot_polar
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    power_to_harmonic_series, harmonic_to_power_series
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    prony, invfreqz
-    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
-    bark_warping, warp, warp_zpk
+from .functions import (
+    read_wav, write_wav, merge, split, list_devices, print_devices,
+    get_device_from_user, fft_convolve, find_delay, corr_coef, resample,
+    peak_time, save, load, plot_time, plot_time_dB, plot_freq, plot_bars,
+    plot_spectrogram, plot_waterfall, SPL, time_window, smooth_frequency,
+    enhanced_spectrogram, minimum_phase, harmonic_distortion, sine_distortion,
+    snr, plot_phase, group_delay, coherence, cepstrum, icepstrum,
+    mls_deconvolution, envelope, start_ir, time_shift, append, normalize,
+    amplify_to, zero_phase, randomize_phase, quantize, butterworth, notch,
+    peak_eq, psd, interpolate_spectrum, extrapolate_low, read_audio,
+    write_audio, read_blockwise, write_txt, read_txt, crossfade_spectra,
+    cut_impulse_train, velocity_from_pressure_gradient, plot_group_delay,
+    plot_nyquist, plot_zplane, plot_polar, power_to_harmonic_series,
+    harmonic_to_power_series, prony, invfreqz, bark_warping, warp, warp_zpk)
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree

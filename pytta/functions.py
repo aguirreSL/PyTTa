@@ -37,6 +37,17 @@ Available functions:
     >>> pytta.plot_bars(signalObj1, signalObj2, ..., signalObjN)
     >>> pytta.save(fileName, obj1, ..., objN)
     >>> pytta.load(fileName)
+    >>> pytta.read_audio(fileName)
+    >>> pytta.write_audio(fileName, signalObj)
+    >>> pytta.read_blockwise(fileName, blockSize)
+    >>> pytta.write_txt(fileName, signalObj)
+    >>> pytta.read_txt(fileName)
+    >>> pytta.psd(signalObj)
+    >>> pytta.interpolate_spectrum(signalObj, nSamples)
+    >>> pytta.extrapolate_low(signalObj, freqRange)
+    >>> pytta.butterworth(signalObj, cutoff)
+    >>> pytta.notch(signalObj, fc)
+    >>> pytta.peak_eq(signalObj, fc, gain)
     >>> pytta.envelope(signalObj)
     >>> pytta.start_ir(signalObj)
     >>> pytta.time_shift(signalObj, shift)
@@ -46,17 +57,6 @@ Available functions:
     >>> pytta.zero_phase(signalObj)
     >>> pytta.randomize_phase(signalObj)
     >>> pytta.quantize(signalObj, bits)
-    >>> pytta.butterworth(signalObj, cutoff)
-    >>> pytta.notch(signalObj, fc)
-    >>> pytta.peak_eq(signalObj, fc, gain)
-    >>> pytta.psd(signalObj)
-    >>> pytta.interpolate_spectrum(signalObj, nSamples)
-    >>> pytta.extrapolate_low(signalObj, freqRange)
-    >>> pytta.read_audio(fileName)
-    >>> pytta.write_audio(fileName, signalObj)
-    >>> pytta.read_blockwise(fileName, blockSize)
-    >>> pytta.write_txt(fileName, signalObj)
-    >>> pytta.read_txt(fileName)
 
 For further information, check the function specific documentation.
 
@@ -212,6 +212,87 @@ def merge(signal1, *signalObjects):
     return newSignal
 
 
+def plot_group_delay(*sigObjs, xLim=None, yLim=None, title=None):
+    """
+    Group delay of every channel of the SignalObjs, in ms, on a logarithmic
+    frequency axis, as ita_plot_groupdelay. Returns the Figure.
+
+    >>> pytta.plot_group_delay(ir1, ir2, xLim=[20, 20000])
+    """
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    for sig in sigObjs:
+        tau = group_delay(sig)
+        for c in range(tau.shape[1]):
+            ax.semilogx(sig.freqVector[1:], 1e3 * tau[1:, c])
+    ax.set(xlabel='Frequency [Hz]', ylabel='Group delay [ms]', xlim=xLim, ylim=yLim, title=title)
+    ax.grid(True, which='both')
+    return fig
+
+
+def plot_nyquist(*sigObjs, title=None):
+    """
+    Imaginary against real part of the spectrum of every channel of the
+    SignalObjs, as ita_plot_nyquist. Returns the Figure.
+    """
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots()
+    for sig in sigObjs:
+        X = np.asarray(sig.freqSignal)
+        for c in range(X.shape[1]):
+            ax.plot(X[:, c].real, X[:, c].imag)
+    ax.set(xlabel='Real part', ylabel='Imaginary part', title=title)
+    ax.set_aspect('equal', 'datalim')
+    ax.grid(True)
+    return fig
+
+
+def plot_zplane(zeros, poles, title=None):
+    """
+    Zeros (o) and poles (x) of a discrete-time system on the z plane, with the
+    unit circle, as ita_plot_zplane; scipy.signal.tf2zpk(b, a) gives them
+    from the coefficients. Returns the Figure.
+
+    >>> pytta.plot_zplane(*scipy.signal.tf2zpk(b, a)[:2])
+    """
+    import matplotlib.pyplot as plt
+    zeros, poles = np.atleast_1d(zeros), np.atleast_1d(poles)
+    fig, ax = plt.subplots()
+    w = np.linspace(0, 2 * np.pi, 361)
+    ax.plot(np.cos(w), np.sin(w), 'k:', lw=0.8)
+    ax.plot(zeros.real, zeros.imag, 'o', mfc='none', label='zeros')
+    ax.plot(poles.real, poles.imag, 'x', label='poles')
+    ax.set(xlabel='Real part', ylabel='Imaginary part', title=title)
+    ax.set_aspect('equal', 'datalim')
+    ax.grid(True)
+    ax.legend()
+    return fig
+
+
+def plot_polar(angles, levels, labels=None, rLim=None, title=None):
+    """
+    Directivity in a polar plot, as ita_plot_polar: levels (dB) at the
+    angles (degrees, 0 to the front, counterclockwise), one column per curve,
+    closed at the first angle. Returns the Figure.
+
+    >>> pytta.plot_polar(np.arange(0, 360, 15), L, labels=['1 kHz', '4 kHz'])
+    """
+    import matplotlib.pyplot as plt
+    theta = np.deg2rad(np.r_[angles, angles[0]])
+    levels = np.asarray(levels, dtype=float).reshape(len(angles), -1)
+    levels = np.vstack([levels, levels[:1]])
+    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+    ax.set_theta_zero_location('N')
+    for c in range(levels.shape[1]):
+        ax.plot(theta, levels[:, c], label=None if labels is None else labels[c])
+    if rLim is not None:
+        ax.set_rlim(rLim)
+    if labels is not None:
+        ax.legend()
+    ax.set_title(title)
+    return fig
+
+
 def split(*signalObjects,
           channels: list = None) -> list:
     """
@@ -304,6 +385,693 @@ def peak_time(signal):
         return peaks_time
     else:
         return peaks_time[0]
+
+def bark_warping(samplingRate):
+    """
+    Warping coefficient that makes the frequency axis approach the Bark
+    scale, 0.8517 sqrt(arctan(0.06583 fs / 1000)) - 0.1916 (Smith and Abel,
+    Bark and ERB bilinear transforms, IEEE Trans. Speech Audio Process. 7(6),
+    1999), as the barkwarp of the ITA-Toolbox.
+    """
+    return 0.8517 * np.sqrt(np.arctan(0.06583 * samplingRate / 1000)) - 0.1916
+
+
+def warp(signal, lam, numSamples=None):
+    """
+    Frequency warped signal, as ita_audio_warp: every delay z^-1 of the
+    signal, taken as an FIR filter, is replaced by the allpass
+    (z^-1 - lam) / (1 - lam z^-1), so that the new spectrum at omega is the
+    old one at omega + 2 arctan(lam sin(omega) / (1 - lam cos(omega))).
+    Positive lam stretches the low frequencies; warp with -lam undoes it.
+    The result has numSamples samples (those of signal if None).
+
+    >>> w = pytta.warp(ir, pytta.bark_warping(ir.samplingRate))
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    n = numSamples or x.shape[0]
+    y = np.zeros((n, x.shape[1]))
+    g = np.zeros(n)
+    g[0] = 1
+    for k in range(x.shape[0]):
+        y += g[:, None] * x[k]
+        g = ss.lfilter([-lam, 1], [1, -lam], g)
+    return SignalObj(y, 'time', signal.samplingRate)
+
+
+def warp_zpk(z, p, k, lam):
+    """
+    Zeros, poles and gain of the filter H(D(z)) with z^-1 replaced by the
+    allpass D(z) = (z^-1 - lam) / (1 - lam z^-1), as ita_zpk_warp: each root
+    r moves to (r + lam) / (1 + lam r), and the difference between the
+    numbers of zeros and poles leaves roots at lam. warp_zpk with -lam undoes
+    it.
+    """
+    z, p = np.atleast_1d(z).astype(complex), np.atleast_1d(p).astype(complex)
+    k = k * np.prod(1 + lam * z) / np.prod(1 + lam * p)
+    extra = np.full(abs(z.size - p.size), lam, dtype=complex)
+    zw, pw = (z + lam) / (1 + lam * z), (p + lam) / (1 + lam * p)
+    if z.size > p.size:
+        pw = np.r_[pw, extra]
+    else:
+        zw = np.r_[zw, extra]
+    return zw, pw, k.real if abs(k.imag) <= 1e-12 * abs(k) else k
+
+
+def prony(h, nb, na):
+    """
+    Coefficients b (nb + 1) and a (na + 1, a[0] = 1) of the IIR filter whose
+    impulse response best matches h, by Prony's method (Parks and Burrus,
+    Digital Filter Design, 1987), as the time domain of ita_prony_analysis:
+    the denominator fits the samples after nb by least squares, and the
+    numerator then matches the first nb + 1 samples exactly.
+    scipy.signal.tf2zpk(b, a) gives the zeros and poles.
+
+    >>> b, a = pytta.prony(ir.timeSignal[:, 0], 8, 8)
+    """
+    from scipy.linalg import toeplitz
+    h = np.asarray(h)
+    if h.size <= max(nb, na):
+        h = np.pad(h, (0, max(nb, na) + 1 - h.size))
+    H = toeplitz(h, np.r_[h[0], np.zeros(na)])
+    a = np.r_[1, -np.linalg.lstsq(H[nb + 1:, 1:], H[nb + 1:, 0], rcond=None)[0]]
+    return H[:nb + 1] @ a, a
+
+
+def invfreqz(H, w, nb, na, weights=None):
+    """
+    Real coefficients b (nb + 1) and a (na + 1, a[0] = 1) of the IIR filter
+    whose frequency response fits H at the normalized frequencies w (rad per
+    sample), by the linear equation error method of Levi (Complex curve
+    fitting, IRE Trans. Automatic Control 4(1), 1959), minimizing
+    sum weights |B(w) - H(w) A(w)|^2, as MATLAB's invfreqz without
+    iterations and the frequency domain of ita_prony_analysis.
+
+    >>> b, a = pytta.invfreqz(H, 2 * np.pi * f / fs, 8, 8)
+    """
+    H, w = np.asarray(H), np.asarray(w)
+    E = np.exp(-1j * np.outer(w, np.arange(max(nb, na) + 1)))
+    M = np.hstack([E[:, :nb + 1], -H[:, None] * E[:, 1:na + 1]])
+    sw = np.sqrt(np.ones(w.size) if weights is None else np.asarray(weights))[:, None]
+    x = np.linalg.lstsq(np.vstack([(sw * M).real, (sw * M).imag]),
+                        np.r_[(sw[:, 0] * H).real, (sw[:, 0] * H).imag], rcond=None)[0]
+    return x[:nb + 1], np.r_[1, x[nb + 1:]]
+
+
+def _harmonic_matrix(order, gain, phase):
+    # Column k - 1: amplitudes of the harmonics 1 to order that x**k gives for
+    # x = gain cos(wt), divided by gain as the sweep deconvolution does, with
+    # harmonic m turned by (m - 1) phase (Dietrich 2013, sec. 3.3).
+    T = np.zeros((order, order), dtype=complex)
+    for k in range(1, order + 1):
+        T[:k, k - 1] = np.polynomial.chebyshev.poly2cheb(np.eye(k + 1)[k])[1:] * gain ** (k - 1)
+    return T * np.exp(1j * phase * np.arange(order))[:, None]
+
+
+def power_to_harmonic_series(coefficients, gain=1, phase=0):
+    """
+    Harmonic series of a power series, as
+    ita_nonlinear_power_to_harmonic_series: the amplitudes of the harmonics
+    1 to N that y = sum_k a_k x**k gives for a cosine of amplitude gain,
+    divided by gain, from the coefficients a_1 to a_N along the first axis
+    (scalars, or arrays converted entry by entry). Harmonic m is turned by
+    (m - 1) phase, the phase offset of an exponential sweep. The DC term is
+    left out.
+
+    >>> pytta.power_to_harmonic_series([1, 1, 1, 1], gain=0.5)  # 1.1875, 0.3125, 0.0625, 0.015625
+    """
+    a = np.asarray(coefficients)
+    T = _harmonic_matrix(a.shape[0], gain, phase)
+    h = np.tensordot(T, a, axes=1)
+    return h.real if np.isrealobj(a) and phase == 0 else h
+
+
+def harmonic_to_power_series(harmonics, gain=1, phase=0):
+    """
+    Power series coefficients a_1 to a_N of the harmonic series 1 to N, the
+    inverse of power_to_harmonic_series, as
+    ita_nonlinear_harmonic_to_power_series.
+    """
+    h = np.asarray(harmonics)
+    T = _harmonic_matrix(h.shape[0], gain, phase)
+    a = np.tensordot(np.linalg.inv(T), h, axes=1)
+    return a.real if np.isrealobj(h) and phase == 0 else a
+
+
+def crossfade_spectra(signal_low, signal_high, freqs):
+    """
+    Spectrum of signal_low below freqs[0] Hz and of signal_high above
+    freqs[1] Hz, with a raised cosine crossfade between them, as
+    ita_xfade_spk; a single frequency takes half of each at that bin.
+    Both signals need the same sampling rate and number of samples.
+
+    >>> combined = pytta.crossfade_spectra(ir_simulated, ir_measured, [200, 400])
+    """
+    fs = signal_low.samplingRate
+    if fs != signal_high.samplingRate:
+        raise ValueError('The signals must have the same sampling rate.')
+    f0, f1 = np.broadcast_to(np.asarray(freqs, dtype=float), (2,))
+    n = signal_low.timeSignal.shape[0]
+    A = np.fft.rfft(signal_low.timeSignal, axis=0)
+    if f0 >= fs / 2:
+        return SignalObj(np.fft.irfft(A, n, axis=0), 'time', fs)
+    B = np.fft.rfft(signal_high.timeSignal, axis=0)
+    b0, b1 = (int(round(f * n / fs)) for f in (f0, min(f1, fs / 2)))
+    if b1 > b0:
+        rise = 0.5 - 0.5 * np.cos(np.pi * np.arange(b1 - b0 + 1) / (b1 - b0))
+    else:
+        rise = np.array([0.5])
+    gain_low = np.zeros(A.shape[0])
+    gain_low[:b0] = 1
+    gain_low[b0:b1 + 1] = 1 - rise
+    gain_high = np.zeros(A.shape[0])
+    gain_high[b1 + 1:] = 1
+    gain_high[b0:b1 + 1] = rise
+    X = A * gain_low[:, None] + B * gain_high[:, None]
+    return SignalObj(np.fft.irfft(X, n, axis=0), 'time', fs)
+
+
+def cut_impulse_train(signal, threshold=0.7, length=1, start_before=0.004, ref_channel=0):
+    """
+    Impulses of an impulse train cut out of signal, as ita_cutImpulseTrain.
+    A sample of ref_channel above the threshold, threshold * L_max +
+    (1 - threshold) * L_rms dB, begins an impulse when it comes length
+    seconds or more after the previous sample above it; each impulse is
+    length seconds from start_before seconds before that sample, cut at the
+    same samples in every channel.
+
+    Returns a list with one SignalObj per channel, whose channels are the
+    impulses, and the 0-based start samples.
+
+    >>> impulses, starts = pytta.cut_impulse_train(take, length=0.5)
+    """
+    fs = signal.samplingRate
+    x = np.asarray(signal.timeSignal)
+    n = x.shape[0]
+    nlen, nbefore = round(length * fs), round(start_before * fs)
+    ref = x[:, ref_channel]
+    with np.errstate(divide='ignore'):
+        level = 20 * np.log10(np.abs(ref))
+    thr = threshold * level.max() + (1 - threshold) * 10 * np.log10(np.mean(ref ** 2))
+    idx = np.flatnonzero(level > thr)
+    idx = idx[idx <= n - nlen + nbefore]
+    idx = idx[np.r_[True, np.diff(idx) >= nlen]] if idx.size else idx
+    starts = idx[idx >= nbefore] - nbefore
+    take = starts[:, None] + np.arange(nlen)
+    return [SignalObj(x[take, c].T, 'time', fs) for c in range(x.shape[1])], starts
+
+
+def velocity_from_pressure_gradient(signal, distance, rho=1.2, c=343, normalized=False):
+    """
+    Particle velocity (m/s) midway between two microphones distance m apart
+    from the pressures of channels 0 and 1 (Pa), by Euler's equation,
+    v = (p0 - p1) / (j omega rho distance), as
+    ita_velocity_from_pressure_gradient; times rho c if normalized. The DC
+    bin is set to zero.
+
+    >>> v = pytta.velocity_from_pressure_gradient(pp_probe, 0.012)
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    if x.shape[1] != 2:
+        raise ValueError('The signal must have two channels.')
+    n = x.shape[0]
+    P = np.fft.rfft(x[:, 0] - x[:, 1])
+    omega = 2 * np.pi * np.fft.rfftfreq(n, 1 / signal.samplingRate)
+    V = np.zeros_like(P)
+    V[1:] = P[1:] / (1j * omega[1:] * rho * distance)
+    if normalized:
+        V *= rho * c
+    return SignalObj(np.fft.irfft(V, n), 'time', signal.samplingRate)
+
+
+def _soundfile():
+    try:
+        import soundfile
+    except ImportError as err:          # pragma: no cover
+        raise ImportError('read_audio, write_audio and read_blockwise need the '
+                          'soundfile package (pip install soundfile).') from err
+    return soundfile
+
+
+def read_audio(fileName, dtype='float64'):
+    """
+    SignalObj from an audio file in any format that libsndfile reads (WAV,
+    FLAC, CAF, AU, AIFF, OGG, ...), as ita_read_flac, ita_read_caf and
+    ita_read_au; needs the soundfile package.
+
+    >>> sig = pytta.read_audio('take.flac')
+    """
+    sf = _soundfile()
+    data, fs = sf.read(fileName, dtype=dtype, always_2d=True)
+    return SignalObj(data, 'time', fs)
+
+
+def write_audio(fileName, signal, subtype=None):
+    """
+    signal to an audio file whose format follows the extension (WAV, FLAC,
+    CAF, AU, AIFF, ...), with the libsndfile subtype (e.g. 'PCM_24',
+    'FLOAT'; the default of the format if None); needs soundfile.
+
+    >>> pytta.write_audio('take.flac', sig, 'PCM_24')
+    """
+    sf = _soundfile()
+    sf.write(fileName, np.asarray(signal.timeSignal, dtype=float),
+             int(signal.samplingRate), subtype=subtype)
+
+
+def read_blockwise(fileName, block_size, overlap=0):
+    """
+    Generator of SignalObj blocks of block_size samples from an audio file,
+    consecutive blocks sharing overlap samples, as ita_read_blockwise; the
+    last block is shorter when the file ends. Needs soundfile.
+
+    >>> for block in pytta.read_blockwise('long.wav', 48000): ...
+    """
+    sf = _soundfile()
+    fs = sf.info(fileName).samplerate
+    for block in sf.blocks(fileName, blocksize=block_size, overlap=overlap,
+                           always_2d=True, dtype='float64'):
+        yield SignalObj(block, 'time', fs)
+
+
+def write_txt(fileName, signal, domain='time', delimiter=' '):
+    """
+    signal to a text file as ita_write_txt: the time (s) or frequency (Hz)
+    in the first column, then each channel, in the time domain its samples
+    and in the frequency domain the real and imaginary parts of its DFT
+    (numpy.fft.rfft of timeSignal).
+
+    >>> pytta.write_txt('response.txt', ir, domain='freq')
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    if domain == 'time':
+        cols = [np.arange(x.shape[0]) / signal.samplingRate] + [x[:, c] for c in range(x.shape[1])]
+    elif domain == 'freq':
+        X = np.fft.rfft(x, axis=0)
+        cols = [np.fft.rfftfreq(x.shape[0], 1 / signal.samplingRate)]
+        for c in range(x.shape[1]):
+            cols += [X[:, c].real, X[:, c].imag]
+    else:
+        raise ValueError("domain must be 'time' or 'freq'.")
+    np.savetxt(fileName, np.column_stack(cols), delimiter=delimiter, fmt='%.17g')
+
+
+def read_txt(fileName, domain='time', samplingRate=None, numSamples=None, delimiter=None):
+    """
+    SignalObj from a text file of write_txt or ita_write_txt. In the time
+    domain the sampling rate comes from the time column; in the frequency
+    domain it is the last frequency times 2 (numSamples even, 2 (bins - 1),
+    unless given).
+    """
+    data = np.loadtxt(fileName, delimiter=delimiter, ndmin=2)
+    if domain == 'time':
+        fs = samplingRate or round(1 / (data[1, 0] - data[0, 0]))
+        return SignalObj(data[:, 1:], 'time', fs)
+    if domain != 'freq':
+        raise ValueError("domain must be 'time' or 'freq'.")
+    f = data[:, 0]
+    n = numSamples or 2 * (f.size - 1)
+    fs = samplingRate or round(f[1] * n)
+    X = data[:, 1::2] + 1j * data[:, 2::2]
+    return SignalObj(np.fft.irfft(X, n, axis=0), 'time', fs)
+
+
+def psd(signal, signal2=None, block_size=None, fft_size=None):
+    """
+    Power spectral density of each channel, or the cross power spectral
+    density with the same channel of signal2, as ita_psd: Welch averaging
+    with a symmetric Hann window of block_size samples (the whole signal by
+    default) and half-block overlap, one-sided, in units^2/Hz, with the
+    convention of MATLAB cpsd, X conj(Y) (the conjugate of
+    scipy.signal.csd).
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        Frequencies (Hz) and the density, (bins, channels).
+
+    >>> freq, P = pytta.psd(noise, block_size=1024)
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    y = x if signal2 is None else np.asarray(signal2.timeSignal, dtype=float)
+    if y.shape != x.shape:
+        raise ValueError('both signals need the same length and channels.')
+    block = x.shape[0] if block_size is None else int(round(block_size))
+    block += block % 2
+    if block > x.shape[0]:
+        x = np.vstack([x, np.zeros((block - x.shape[0], x.shape[1]))])
+        y = np.vstack([y, np.zeros((block - y.shape[0], y.shape[1]))])
+    nfft = block if fft_size is None else int(fft_size)
+    window = np.hanning(block + 2)[1:-1]          # MATLAB hanning(block)
+    f, P = ss.csd(x, y, fs=signal.samplingRate, window=window, noverlap=block // 2,
+                  nfft=nfft, axis=0, detrend=False, scaling='density')
+    return f, np.conj(P) if signal2 is not None else P.real    # MATLAB cpsd: X conj(Y)
+
+
+def interpolate_spectrum(signal, n_samples, method='spline', abs_phase=False):
+    """
+    signal with its spectrum interpolated onto the bins of n_samples, as
+    ita_interpolate_spk: the DFT is interpolated between DC and the highest
+    frequency (spline, as MATLAB interp1, or linear), on its real and
+    imaginary parts or (abs_phase=True) on magnitude and unwrapped phase.
+    Meant for energy signals such as impulse responses.
+
+    >>> longer = pytta.interpolate_spectrum(ir, 2 ** 16)
+    """
+    from scipy.interpolate import CubicSpline
+    x = np.asarray(signal.timeSignal, dtype=float)
+    X = np.fft.rfft(x, axis=0)
+    old = np.linspace(0, 1, X.shape[0])
+    new = np.linspace(0, 1, n_samples // 2 + 1)
+    if method == 'spline':
+        interp = lambda v: CubicSpline(old, v, axis=0)(new)
+    elif method == 'linear':
+        interp = lambda v: np.column_stack([np.interp(new, old, v[:, c]) for c in range(v.shape[1])])
+    else:
+        raise ValueError("method must be 'spline' or 'linear'.")
+    if abs_phase:
+        Y = interp(np.abs(X)) * np.exp(1j * interp(np.unwrap(np.angle(X), axis=0)))
+    else:
+        Y = interp(X.real) + 1j * interp(X.imag)
+    newSignal = SignalObj(np.fft.irfft(Y, n_samples, axis=0), 'time',
+                          samplingRate=signal.samplingRate, signalType=signal.signalType)
+    newSignal.channels = cp.deepcopy(signal.channels)
+    return newSignal
+
+
+def extrapolate_low(signal, freq_range, slope=0.):
+    """
+    Spectrum below freq_range replaced by an extrapolation, as the lower
+    part of ita_spk_extrapolate: the mean magnitude of freq_range, changed
+    by slope dB per decade towards low frequencies, and a linear phase from
+    the mean group delay of freq_range, joined to the phase at its lower
+    end.
+
+    Parameters
+    ----------
+    freq_range : (float, float)
+        Frequencies (Hz) whose magnitude and group delay are averaged.
+    slope : float
+        dB per decade below freq_range. Default 0.
+
+    >>> fixed = pytta.extrapolate_low(ir, (80, 160))
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    n = x.shape[0]
+    X = np.fft.rfft(x, axis=0)
+    f = np.fft.rfftfreq(n, 1 / signal.samplingRate)
+    lo = int(np.flatnonzero(f > min(freq_range))[0])
+    hi = int(np.flatnonzero(f > max(freq_range))[0])
+    df = f[1]
+    band = X[lo:hi + 1]
+    gdelay = -np.diff(np.unwrap(np.angle(X), axis=0), axis=0) / (2 * np.pi * df)
+    tau = np.mean(gdelay[lo:hi + 1], axis=0)
+    fl = f[:lo + 1, None]
+    phase = -2 * np.pi * tau * fl
+    phase = phase - (phase[-1] - np.angle(band[0]))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        shape = 10 ** (slope * (np.log10(fl) - np.log10(fl[-1])) / 20)
+    shape[0] = 0 if slope > 0 else shape[min(1, lo)]   # DC: limit, or held for slope <= 0
+    X[:lo + 1] = np.mean(np.abs(band), axis=0) * shape * np.exp(1j * phase)
+    X[0] = X[0].real
+    newSignal = SignalObj(np.fft.irfft(X, n, axis=0), 'time',
+                          samplingRate=signal.samplingRate, signalType=signal.signalType)
+    newSignal.channels = cp.deepcopy(signal.channels)
+    return newSignal
+
+
+def _apply_response(signal, response_of):
+    """signal filtered by the complex response response_of(f) at its rfft bins."""
+    x = np.asarray(signal.timeSignal, dtype=float)
+    n = x.shape[0]
+    f = np.fft.rfftfreq(n, 1 / signal.samplingRate)
+    y = np.fft.irfft(np.fft.rfft(x, axis=0) * response_of(f)[:, None], n, axis=0)
+    newSignal = SignalObj(y, 'time', samplingRate=signal.samplingRate,
+                          signalType=signal.signalType)
+    newSignal.channels = cp.deepcopy(signal.channels)
+    return newSignal
+
+
+def butterworth(signal, cutoff, btype='low', order=8, linkwitz_riley=False,
+                zero_phase=False):
+    """
+    signal filtered by a Butterworth or Linkwitz-Riley filter, applied to
+    its spectrum (circular), as ita_butterFR, ita_liriFR and ita_filter_LiRi.
+
+    Parameters
+    ----------
+    signal : SignalObj
+    cutoff : float or (float, float)
+        Cut-off frequency in Hz, or the two of a band-pass.
+    btype : str
+        'low', 'high' or 'band'.
+    order : int
+        Order of the filter; a Linkwitz-Riley filter of order 2k is a
+        Butterworth filter of order k squared. Default 8.
+    linkwitz_riley : bool
+        Linkwitz-Riley instead of Butterworth. Default False.
+    zero_phase : bool
+        Keep only the magnitude of the response. Default False.
+
+    The response is evaluated at the frequencies of the FFT bins of the
+    signal (ita_butterFR samples it with MATLAB freqz(Hd, nBins), from 0 to
+    pi without pi, so its bins sit slightly off the FFT bins).
+
+    >>> lowpassed = pytta.butterworth(signalObj, 1000)
+    """
+    if btype not in ('low', 'high', 'band'):
+        raise ValueError("btype must be 'low', 'high' or 'band'.")
+    k = order // 2 if linkwitz_riley else order
+    if linkwitz_riley and order % 2:
+        raise ValueError('a Linkwitz-Riley filter has an even order.')
+    sos = ss.butter(k, cutoff, btype={'band': 'bandpass'}.get(btype, btype),
+                    fs=signal.samplingRate, output='sos')
+
+    def response(f):
+        _, h = ss.sosfreqz(sos, f, fs=signal.samplingRate)
+        h = h * h if linkwitz_riley else h
+        return np.abs(h) if zero_phase else h
+    return _apply_response(signal, response)
+
+
+def _biquad_response(b, a, fs):
+    def response(f):
+        return ss.freqz(b, a, f, fs=fs)[1]
+    return response
+
+
+def notch(signal, fc, Q=2.):
+    """
+    signal through a second-order notch at fc (Hz) with quality factor Q,
+    applied to its spectrum, as ita_filter_notch (the biquad of the Audio
+    EQ Cookbook of R. Bristow-Johnson).
+
+    >>> pytta.notch(signalObj, 50, Q=10)
+    """
+    w0 = 2 * np.pi * fc / signal.samplingRate
+    alpha = np.sin(w0) / (2 * Q)
+    b = [1, -2 * np.cos(w0), 1]
+    a = [1 + alpha, -2 * np.cos(w0), 1 - alpha]
+    return _apply_response(signal, _biquad_response(b, a, signal.samplingRate))
+
+
+def peak_eq(signal, fc, gain, Q=2.):
+    """
+    signal through a second-order peak (bell) filter at fc (Hz) with gain
+    (dB) and quality factor Q, applied to its spectrum, as ita_filter_peak
+    (bilinear design with K = tan(pi fc / fs) and V = 10^(gain / 20)).
+
+    >>> pytta.peak_eq(signalObj, 1000, 6)
+    """
+    K = np.tan(np.pi * fc / signal.samplingRate)
+    V = 10 ** (gain / 20)
+    b = [1 + V * K / Q + K ** 2, 2 * (K ** 2 - 1), 1 - V * K / Q + K ** 2]
+    a = [1 + K / Q + K ** 2, 2 * (K ** 2 - 1), 1 - K / Q + K ** 2]
+    return _apply_response(signal, _biquad_response(b, a, signal.samplingRate))
+
+
+def _new_signal(signal, data, domain='time'):
+    """SignalObj like signal (sampling rate, channels) holding data."""
+    newSignal = SignalObj(data, domain, samplingRate=signal.samplingRate,
+                          signalType=signal.signalType)
+    newSignal.channels = cp.deepcopy(signal.channels)
+    return newSignal
+
+
+def envelope(signal):
+    """
+    Envelope of each channel, the magnitude of the analytic signal
+    (Hilbert transform), computed on twice the signal length to keep the
+    circular wrap out of it, as ita_envelope.
+
+    >>> env = pytta.envelope(signalObj)
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    n = x.shape[0]
+    return _new_signal(signal, np.abs(ss.hilbert(x, N=2 * n, axis=0)[:n]))
+
+
+def start_ir(signal, threshold=20.):
+    """
+    Start of each channel of an impulse response, ISO 3382-1:2009, A.3: the
+    last sample before the peak that lies more than threshold dB below the
+    peak of the squared response, as ita_start_IR.
+
+    If a sample 6 dB above that level comes earlier, the start moves to the
+    last sample below the threshold before it (an oscillating onset). A
+    channel whose peak is less than 20 dB above its noise (the mean of the
+    last 10 %) or lies in that last 10 % gets 0.
+
+    Returns
+    -------
+    numpy.ndarray
+        0-based start sample of each channel.
+
+    >>> pytta.start_ir(ir)
+    """
+    x2 = np.asarray(signal.timeSignal, dtype=float) ** 2
+    n = x2.shape[0]
+    noise = np.mean(x2[int(round(0.9 * n)) - 1:], axis=0)
+    peak, at = np.max(x2, axis=0), np.argmax(x2, axis=0)
+    thr = -abs(threshold)
+    start = np.zeros(x2.shape[1], dtype=int)
+    for c in range(x2.shape[1]):
+        if peak[c] < 100 * noise[c] or at[c] + 1 > round(0.9 * n) or at[c] == 0:
+            continue
+        with np.errstate(divide='ignore'):
+            level = 10 * np.log10(x2[:at[c] + 1, c]) - 10 * np.log10(peak[c])
+        below = np.flatnonzero(level < thr)
+        start[c] = below[-1] if below.size else 0
+        above = np.flatnonzero(level[:start[c] + 1] > thr + 6)
+        if above.size:
+            before = np.flatnonzero(level[:above[0] + 1] < thr)
+            start[c] = before[-1] if before.size else 0
+    return start
+
+
+def time_shift(signal, shift=None, unit='time'):
+    """
+    Cyclic shift of each channel, as ita_time_shift.
+
+    Parameters
+    ----------
+    signal : SignalObj
+    shift : float, array_like or None
+        Shift in seconds (unit='time') or samples (unit='samples'), one for
+        all channels or one per channel; a fraction of a sample is applied
+        as a linear phase. None moves the earliest start of the impulse
+        response (start_ir) to the first sample.
+    unit : str
+        'time' (default) or 'samples'.
+
+    >>> shifted = pytta.time_shift(ir, 1e-3)
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    fs = signal.samplingRate
+    if shift is None:
+        samples = np.full(x.shape[1], -np.min(start_ir(signal)), dtype=float)
+    elif unit == 'samples':
+        samples = np.broadcast_to(np.asarray(shift, dtype=float), (x.shape[1],))
+    elif unit == 'time':
+        samples = np.broadcast_to(np.round(np.asarray(shift, dtype=float) * fs), (x.shape[1],))
+    else:
+        raise ValueError("unit must be 'time' or 'samples'.")
+    out = np.empty_like(x)
+    n = x.shape[0]
+    for c in range(x.shape[1]):
+        k = samples[c]
+        if k == round(k):
+            out[:, c] = np.roll(x[:, c], int(k))
+        else:
+            f = np.fft.rfftfreq(n)
+            out[:, c] = np.fft.irfft(np.fft.rfft(x[:, c]) * np.exp(-2j * np.pi * f * k), n)
+    return _new_signal(signal, out)
+
+
+def append(signal1, signal2):
+    """
+    signal2 after signal1 in time, as ita_append; both need the same
+    sampling rate and number of channels.
+
+    >>> longer = pytta.append(signalObj1, signalObj2)
+    """
+    if signal1.samplingRate != signal2.samplingRate:
+        raise ValueError('the sampling rates differ.')
+    if signal1.numChannels != signal2.numChannels:
+        raise ValueError('the numbers of channels differ.')
+    return _new_signal(signal1, np.vstack([np.asarray(signal1.timeSignal, dtype=float),
+                                           np.asarray(signal2.timeSignal, dtype=float)]))
+
+
+def normalize(signal, domain='time', per_channel=False):
+    """
+    Signal scaled so that its largest magnitude, in time or in the
+    spectrum, is 1, as ita_normalize_dat and ita_normalize_spk.
+
+    Returns
+    -------
+    (SignalObj, numpy.ndarray)
+        The scaled signal and the gain removed (one value, or one per
+        channel with per_channel=True).
+
+    >>> normed, peak = pytta.normalize(signalObj)
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    if domain == 'time':
+        mag = np.abs(x)
+    elif domain == 'freq':
+        mag = np.abs(np.fft.rfft(x, axis=0))
+    else:
+        raise ValueError("domain must be 'time' or 'freq'.")
+    gain = np.max(mag, axis=0) if per_channel else np.max(mag)
+    return _new_signal(signal, x / gain), np.atleast_1d(gain)
+
+
+def amplify_to(signal, level):
+    """
+    Signal scaled so that the mean RMS of its channels is level dB, re
+    20 uPa for channels in Pa and re 1 otherwise, as ita_amplify_to.
+
+    >>> at_70dB = pytta.amplify_to(signalObj, 70)
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    ref = 2e-5 if signal.channels[signal.channels.mapping[0]].unit == 'Pa' else 1.
+    rms = np.mean(np.sqrt(np.mean(x ** 2, axis=0)))
+    return _new_signal(signal, x * 10 ** ((level - 20 * np.log10(rms / ref)) / 20))
+
+
+def zero_phase(signal):
+    """Signal with the magnitude spectrum of signal and zero phase (ita_zerophase)."""
+    x = np.asarray(signal.timeSignal, dtype=float)
+    return _new_signal(signal, np.fft.irfft(np.abs(np.fft.rfft(x, axis=0)), x.shape[0], axis=0))
+
+
+def randomize_phase(signal, seed=None):
+    """
+    Signal with the magnitude spectrum of signal and a uniformly random
+    phase (ita_randomize_phase); DC and Nyquist keep their sign so that the
+    result is real.
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    X = np.fft.rfft(x, axis=0)
+    phase = np.random.default_rng(seed).uniform(0, 2 * np.pi, X.shape)
+    phase[0] = np.angle(X[0])
+    if x.shape[0] % 2 == 0:
+        phase[-1] = np.angle(X[-1])
+    return _new_signal(signal, np.fft.irfft(np.abs(X) * np.exp(1j * phase), x.shape[0], axis=0))
+
+
+def quantize(signal, bits=24):
+    """
+    Signal rounded to 2^(bits - 1) + 1 intervals across its peak, halves
+    away from zero, as ita_quantize.
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    peak = np.max(np.abs(x))
+    steps = 2 ** (bits - 1) + 1
+    v = x / peak * steps / 2
+    v = np.sign(v) * np.floor(np.abs(v) + 0.5)       # halves away from zero
+    return _new_signal(signal, v / steps * 2 * peak)
+
 
 def time_window(signalObj, interval, unit='time', window='hann',
                 symmetric=False):
@@ -824,76 +1592,6 @@ def icepstrum(cepstrumObj, delay=0):
 def _cepstrum_signal(signal, data):
     newSignal = SignalObj(data, 'time', samplingRate=signal.samplingRate,
                           signalType='energy')
-def _new_signal(signal, data, domain='time'):
-    """SignalObj like signal (sampling rate, channels) holding data."""
-    newSignal = SignalObj(data, domain, samplingRate=signal.samplingRate,
-def _apply_response(signal, response_of):
-    """signal filtered by the complex response response_of(f) at its rfft bins."""
-    x = np.asarray(signal.timeSignal, dtype=float)
-    n = x.shape[0]
-    f = np.fft.rfftfreq(n, 1 / signal.samplingRate)
-    y = np.fft.irfft(np.fft.rfft(x, axis=0) * response_of(f)[:, None], n, axis=0)
-    newSignal = SignalObj(y, 'time', samplingRate=signal.samplingRate,
-                          signalType=signal.signalType)
-def psd(signal, signal2=None, block_size=None, fft_size=None):
-    """
-    Power spectral density of each channel, or the cross power spectral
-    density with the same channel of signal2, as ita_psd: Welch averaging
-    with a symmetric Hann window of block_size samples (the whole signal by
-    default) and half-block overlap, one-sided, in units^2/Hz, with the
-    convention of MATLAB cpsd, X conj(Y) (the conjugate of
-    scipy.signal.csd).
-
-    Returns
-    -------
-    (numpy.ndarray, numpy.ndarray)
-        Frequencies (Hz) and the density, (bins, channels).
-
-    >>> freq, P = pytta.psd(noise, block_size=1024)
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    y = x if signal2 is None else np.asarray(signal2.timeSignal, dtype=float)
-    if y.shape != x.shape:
-        raise ValueError('both signals need the same length and channels.')
-    block = x.shape[0] if block_size is None else int(round(block_size))
-    block += block % 2
-    if block > x.shape[0]:
-        x = np.vstack([x, np.zeros((block - x.shape[0], x.shape[1]))])
-        y = np.vstack([y, np.zeros((block - y.shape[0], y.shape[1]))])
-    nfft = block if fft_size is None else int(fft_size)
-    window = np.hanning(block + 2)[1:-1]          # MATLAB hanning(block)
-    f, P = ss.csd(x, y, fs=signal.samplingRate, window=window, noverlap=block // 2,
-                  nfft=nfft, axis=0, detrend=False, scaling='density')
-    return f, np.conj(P) if signal2 is not None else P.real    # MATLAB cpsd: X conj(Y)
-
-
-def interpolate_spectrum(signal, n_samples, method='spline', abs_phase=False):
-    """
-    signal with its spectrum interpolated onto the bins of n_samples, as
-    ita_interpolate_spk: the DFT is interpolated between DC and the highest
-    frequency (spline, as MATLAB interp1, or linear), on its real and
-    imaginary parts or (abs_phase=True) on magnitude and unwrapped phase.
-    Meant for energy signals such as impulse responses.
-
-    >>> longer = pytta.interpolate_spectrum(ir, 2 ** 16)
-    """
-    from scipy.interpolate import CubicSpline
-    x = np.asarray(signal.timeSignal, dtype=float)
-    X = np.fft.rfft(x, axis=0)
-    old = np.linspace(0, 1, X.shape[0])
-    new = np.linspace(0, 1, n_samples // 2 + 1)
-    if method == 'spline':
-        interp = lambda v: CubicSpline(old, v, axis=0)(new)
-    elif method == 'linear':
-        interp = lambda v: np.column_stack([np.interp(new, old, v[:, c]) for c in range(v.shape[1])])
-    else:
-        raise ValueError("method must be 'spline' or 'linear'.")
-    if abs_phase:
-        Y = interp(np.abs(X)) * np.exp(1j * interp(np.unwrap(np.angle(X), axis=0)))
-    else:
-        Y = interp(X.real) + 1j * interp(X.imag)
-    newSignal = SignalObj(np.fft.irfft(Y, n_samples, axis=0), 'time',
-                          samplingRate=signal.samplingRate, signalType=signal.signalType)
     newSignal.channels = cp.deepcopy(signal.channels)
     return newSignal
 
@@ -940,674 +1638,6 @@ def mls_deconvolution(response, order):
                           signalType='energy')
     newSignal.channels = cp.deepcopy(response.channels)
     return newSignal
-def envelope(signal):
-    """
-    Envelope of each channel, the magnitude of the analytic signal
-    (Hilbert transform), computed on twice the signal length to keep the
-    circular wrap out of it, as ita_envelope.
-
-    >>> env = pytta.envelope(signalObj)
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    n = x.shape[0]
-    return _new_signal(signal, np.abs(ss.hilbert(x, N=2 * n, axis=0)[:n]))
-
-
-def start_ir(signal, threshold=20.):
-    """
-    Start of each channel of an impulse response, ISO 3382-1:2009, A.3: the
-    last sample before the peak that lies more than threshold dB below the
-    peak of the squared response, as ita_start_IR.
-
-    If a sample 6 dB above that level comes earlier, the start moves to the
-    last sample below the threshold before it (an oscillating onset). A
-    channel whose peak is less than 20 dB above its noise (the mean of the
-    last 10 %) or lies in that last 10 % gets 0.
-
-    Returns
-    -------
-    numpy.ndarray
-        0-based start sample of each channel.
-
-    >>> pytta.start_ir(ir)
-    """
-    x2 = np.asarray(signal.timeSignal, dtype=float) ** 2
-    n = x2.shape[0]
-    noise = np.mean(x2[int(round(0.9 * n)) - 1:], axis=0)
-    peak, at = np.max(x2, axis=0), np.argmax(x2, axis=0)
-    thr = -abs(threshold)
-    start = np.zeros(x2.shape[1], dtype=int)
-    for c in range(x2.shape[1]):
-        if peak[c] < 100 * noise[c] or at[c] + 1 > round(0.9 * n) or at[c] == 0:
-            continue
-        with np.errstate(divide='ignore'):
-            level = 10 * np.log10(x2[:at[c] + 1, c]) - 10 * np.log10(peak[c])
-        below = np.flatnonzero(level < thr)
-        start[c] = below[-1] if below.size else 0
-        above = np.flatnonzero(level[:start[c] + 1] > thr + 6)
-        if above.size:
-            before = np.flatnonzero(level[:above[0] + 1] < thr)
-            start[c] = before[-1] if before.size else 0
-    return start
-
-
-def time_shift(signal, shift=None, unit='time'):
-    """
-    Cyclic shift of each channel, as ita_time_shift.
-def butterworth(signal, cutoff, btype='low', order=8, linkwitz_riley=False,
-                zero_phase=False):
-    """
-    signal filtered by a Butterworth or Linkwitz-Riley filter, applied to
-    its spectrum (circular), as ita_butterFR, ita_liriFR and ita_filter_LiRi.
-
-    Parameters
-    ----------
-    signal : SignalObj
-    shift : float, array_like or None
-        Shift in seconds (unit='time') or samples (unit='samples'), one for
-        all channels or one per channel; a fraction of a sample is applied
-        as a linear phase. None moves the earliest start of the impulse
-        response (start_ir) to the first sample.
-    unit : str
-        'time' (default) or 'samples'.
-
-    >>> shifted = pytta.time_shift(ir, 1e-3)
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    fs = signal.samplingRate
-    if shift is None:
-        samples = np.full(x.shape[1], -np.min(start_ir(signal)), dtype=float)
-    elif unit == 'samples':
-        samples = np.broadcast_to(np.asarray(shift, dtype=float), (x.shape[1],))
-    elif unit == 'time':
-        samples = np.broadcast_to(np.round(np.asarray(shift, dtype=float) * fs), (x.shape[1],))
-    else:
-        raise ValueError("unit must be 'time' or 'samples'.")
-    out = np.empty_like(x)
-    n = x.shape[0]
-    for c in range(x.shape[1]):
-        k = samples[c]
-        if k == round(k):
-            out[:, c] = np.roll(x[:, c], int(k))
-        else:
-            f = np.fft.rfftfreq(n)
-            out[:, c] = np.fft.irfft(np.fft.rfft(x[:, c]) * np.exp(-2j * np.pi * f * k), n)
-    return _new_signal(signal, out)
-
-
-def append(signal1, signal2):
-    """
-    signal2 after signal1 in time, as ita_append; both need the same
-    sampling rate and number of channels.
-
-    >>> longer = pytta.append(signalObj1, signalObj2)
-    """
-    if signal1.samplingRate != signal2.samplingRate:
-        raise ValueError('the sampling rates differ.')
-    if signal1.numChannels != signal2.numChannels:
-        raise ValueError('the numbers of channels differ.')
-    return _new_signal(signal1, np.vstack([np.asarray(signal1.timeSignal, dtype=float),
-                                           np.asarray(signal2.timeSignal, dtype=float)]))
-
-
-def normalize(signal, domain='time', per_channel=False):
-    """
-    Signal scaled so that its largest magnitude, in time or in the
-    spectrum, is 1, as ita_normalize_dat and ita_normalize_spk.
-
-    Returns
-    -------
-    (SignalObj, numpy.ndarray)
-        The scaled signal and the gain removed (one value, or one per
-        channel with per_channel=True).
-
-    >>> normed, peak = pytta.normalize(signalObj)
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    if domain == 'time':
-        mag = np.abs(x)
-    elif domain == 'freq':
-        mag = np.abs(np.fft.rfft(x, axis=0))
-    else:
-        raise ValueError("domain must be 'time' or 'freq'.")
-    gain = np.max(mag, axis=0) if per_channel else np.max(mag)
-    return _new_signal(signal, x / gain), np.atleast_1d(gain)
-
-
-def amplify_to(signal, level):
-    """
-    Signal scaled so that the mean RMS of its channels is level dB, re
-    20 uPa for channels in Pa and re 1 otherwise, as ita_amplify_to.
-
-    >>> at_70dB = pytta.amplify_to(signalObj, 70)
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    ref = 2e-5 if signal.channels[signal.channels.mapping[0]].unit == 'Pa' else 1.
-    rms = np.mean(np.sqrt(np.mean(x ** 2, axis=0)))
-    return _new_signal(signal, x * 10 ** ((level - 20 * np.log10(rms / ref)) / 20))
-
-
-def zero_phase(signal):
-    """Signal with the magnitude spectrum of signal and zero phase (ita_zerophase)."""
-    x = np.asarray(signal.timeSignal, dtype=float)
-    return _new_signal(signal, np.fft.irfft(np.abs(np.fft.rfft(x, axis=0)), x.shape[0], axis=0))
-
-
-def randomize_phase(signal, seed=None):
-    """
-    Signal with the magnitude spectrum of signal and a uniformly random
-    phase (ita_randomize_phase); DC and Nyquist keep their sign so that the
-    result is real.
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    X = np.fft.rfft(x, axis=0)
-    phase = np.random.default_rng(seed).uniform(0, 2 * np.pi, X.shape)
-    phase[0] = np.angle(X[0])
-    if x.shape[0] % 2 == 0:
-        phase[-1] = np.angle(X[-1])
-    return _new_signal(signal, np.fft.irfft(np.abs(X) * np.exp(1j * phase), x.shape[0], axis=0))
-
-
-def quantize(signal, bits=24):
-    """
-    Signal rounded to 2^(bits - 1) + 1 intervals across its peak, halves
-    away from zero, as ita_quantize.
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    peak = np.max(np.abs(x))
-    steps = 2 ** (bits - 1) + 1
-    v = x / peak * steps / 2
-    v = np.sign(v) * np.floor(np.abs(v) + 0.5)       # halves away from zero
-    return _new_signal(signal, v / steps * 2 * peak)
-    cutoff : float or (float, float)
-        Cut-off frequency in Hz, or the two of a band-pass.
-    btype : str
-        'low', 'high' or 'band'.
-    order : int
-        Order of the filter; a Linkwitz-Riley filter of order 2k is a
-        Butterworth filter of order k squared. Default 8.
-    linkwitz_riley : bool
-        Linkwitz-Riley instead of Butterworth. Default False.
-    zero_phase : bool
-        Keep only the magnitude of the response. Default False.
-
-    The response is evaluated at the frequencies of the FFT bins of the
-    signal (ita_butterFR samples it with MATLAB freqz(Hd, nBins), from 0 to
-    pi without pi, so its bins sit slightly off the FFT bins).
-
-    >>> lowpassed = pytta.butterworth(signalObj, 1000)
-    """
-    if btype not in ('low', 'high', 'band'):
-        raise ValueError("btype must be 'low', 'high' or 'band'.")
-    k = order // 2 if linkwitz_riley else order
-    if linkwitz_riley and order % 2:
-        raise ValueError('a Linkwitz-Riley filter has an even order.')
-    sos = ss.butter(k, cutoff, btype={'band': 'bandpass'}.get(btype, btype),
-                    fs=signal.samplingRate, output='sos')
-
-    def response(f):
-        _, h = ss.sosfreqz(sos, f, fs=signal.samplingRate)
-        h = h * h if linkwitz_riley else h
-        return np.abs(h) if zero_phase else h
-    return _apply_response(signal, response)
-
-
-def _biquad_response(b, a, fs):
-    def response(f):
-        return ss.freqz(b, a, f, fs=fs)[1]
-    return response
-
-
-def notch(signal, fc, Q=2.):
-    """
-    signal through a second-order notch at fc (Hz) with quality factor Q,
-    applied to its spectrum, as ita_filter_notch (the biquad of the Audio
-    EQ Cookbook of R. Bristow-Johnson).
-
-    >>> pytta.notch(signalObj, 50, Q=10)
-    """
-    w0 = 2 * np.pi * fc / signal.samplingRate
-    alpha = np.sin(w0) / (2 * Q)
-    b = [1, -2 * np.cos(w0), 1]
-    a = [1 + alpha, -2 * np.cos(w0), 1 - alpha]
-    return _apply_response(signal, _biquad_response(b, a, signal.samplingRate))
-
-
-def peak_eq(signal, fc, gain, Q=2.):
-    """
-    signal through a second-order peak (bell) filter at fc (Hz) with gain
-    (dB) and quality factor Q, applied to its spectrum, as ita_filter_peak
-    (bilinear design with K = tan(pi fc / fs) and V = 10^(gain / 20)).
-
-    >>> pytta.peak_eq(signalObj, 1000, 6)
-    """
-    K = np.tan(np.pi * fc / signal.samplingRate)
-    V = 10 ** (gain / 20)
-    b = [1 + V * K / Q + K ** 2, 2 * (K ** 2 - 1), 1 - V * K / Q + K ** 2]
-    a = [1 + K / Q + K ** 2, 2 * (K ** 2 - 1), 1 - K / Q + K ** 2]
-    return _apply_response(signal, _biquad_response(b, a, signal.samplingRate))
-def extrapolate_low(signal, freq_range, slope=0.):
-    """
-    Spectrum below freq_range replaced by an extrapolation, as the lower
-    part of ita_spk_extrapolate: the mean magnitude of freq_range, changed
-    by slope dB per decade towards low frequencies, and a linear phase from
-    the mean group delay of freq_range, joined to the phase at its lower
-    end.
-
-    Parameters
-    ----------
-    freq_range : (float, float)
-        Frequencies (Hz) whose magnitude and group delay are averaged.
-    slope : float
-        dB per decade below freq_range. Default 0.
-
-    >>> fixed = pytta.extrapolate_low(ir, (80, 160))
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    n = x.shape[0]
-    X = np.fft.rfft(x, axis=0)
-    f = np.fft.rfftfreq(n, 1 / signal.samplingRate)
-    lo = int(np.flatnonzero(f > min(freq_range))[0])
-    hi = int(np.flatnonzero(f > max(freq_range))[0])
-    df = f[1]
-    band = X[lo:hi + 1]
-    gdelay = -np.diff(np.unwrap(np.angle(X), axis=0), axis=0) / (2 * np.pi * df)
-    tau = np.mean(gdelay[lo:hi + 1], axis=0)
-    fl = f[:lo + 1, None]
-    phase = -2 * np.pi * tau * fl
-    phase = phase - (phase[-1] - np.angle(band[0]))
-    with np.errstate(divide='ignore', invalid='ignore'):
-        shape = 10 ** (slope * (np.log10(fl) - np.log10(fl[-1])) / 20)
-    shape[0] = 0 if slope > 0 else shape[min(1, lo)]   # DC: limit, or held for slope <= 0
-    X[:lo + 1] = np.mean(np.abs(band), axis=0) * shape * np.exp(1j * phase)
-    X[0] = X[0].real
-    newSignal = SignalObj(np.fft.irfft(X, n, axis=0), 'time',
-                          samplingRate=signal.samplingRate, signalType=signal.signalType)
-    newSignal.channels = cp.deepcopy(signal.channels)
-    return newSignal
-def _soundfile():
-    try:
-        import soundfile
-    except ImportError as err:          # pragma: no cover
-        raise ImportError('read_audio, write_audio and read_blockwise need the '
-                          'soundfile package (pip install soundfile).') from err
-    return soundfile
-
-
-def read_audio(fileName, dtype='float64'):
-    """
-    SignalObj from an audio file in any format that libsndfile reads (WAV,
-    FLAC, CAF, AU, AIFF, OGG, ...), as ita_read_flac, ita_read_caf and
-    ita_read_au; needs the soundfile package.
-
-    >>> sig = pytta.read_audio('take.flac')
-    """
-    sf = _soundfile()
-    data, fs = sf.read(fileName, dtype=dtype, always_2d=True)
-    return SignalObj(data, 'time', fs)
-
-
-def write_audio(fileName, signal, subtype=None):
-    """
-    signal to an audio file whose format follows the extension (WAV, FLAC,
-    CAF, AU, AIFF, ...), with the libsndfile subtype (e.g. 'PCM_24',
-    'FLOAT'; the default of the format if None); needs soundfile.
-
-    >>> pytta.write_audio('take.flac', sig, 'PCM_24')
-    """
-    sf = _soundfile()
-    sf.write(fileName, np.asarray(signal.timeSignal, dtype=float),
-             int(signal.samplingRate), subtype=subtype)
-
-
-def read_blockwise(fileName, block_size, overlap=0):
-    """
-    Generator of SignalObj blocks of block_size samples from an audio file,
-    consecutive blocks sharing overlap samples, as ita_read_blockwise; the
-    last block is shorter when the file ends. Needs soundfile.
-
-    >>> for block in pytta.read_blockwise('long.wav', 48000): ...
-    """
-    sf = _soundfile()
-    fs = sf.info(fileName).samplerate
-    for block in sf.blocks(fileName, blocksize=block_size, overlap=overlap,
-                           always_2d=True, dtype='float64'):
-        yield SignalObj(block, 'time', fs)
-
-
-def write_txt(fileName, signal, domain='time', delimiter=' '):
-    """
-    signal to a text file as ita_write_txt: the time (s) or frequency (Hz)
-    in the first column, then each channel, in the time domain its samples
-    and in the frequency domain the real and imaginary parts of its DFT
-    (numpy.fft.rfft of timeSignal).
-
-    >>> pytta.write_txt('response.txt', ir, domain='freq')
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    if domain == 'time':
-        cols = [np.arange(x.shape[0]) / signal.samplingRate] + [x[:, c] for c in range(x.shape[1])]
-    elif domain == 'freq':
-        X = np.fft.rfft(x, axis=0)
-        cols = [np.fft.rfftfreq(x.shape[0], 1 / signal.samplingRate)]
-        for c in range(x.shape[1]):
-            cols += [X[:, c].real, X[:, c].imag]
-    else:
-        raise ValueError("domain must be 'time' or 'freq'.")
-    np.savetxt(fileName, np.column_stack(cols), delimiter=delimiter, fmt='%.17g')
-
-
-def read_txt(fileName, domain='time', samplingRate=None, numSamples=None, delimiter=None):
-    """
-    SignalObj from a text file of write_txt or ita_write_txt. In the time
-    domain the sampling rate comes from the time column; in the frequency
-    domain it is the last frequency times 2 (numSamples even, 2 (bins - 1),
-    unless given).
-    """
-    data = np.loadtxt(fileName, delimiter=delimiter, ndmin=2)
-    if domain == 'time':
-        fs = samplingRate or round(1 / (data[1, 0] - data[0, 0]))
-        return SignalObj(data[:, 1:], 'time', fs)
-    if domain != 'freq':
-        raise ValueError("domain must be 'time' or 'freq'.")
-    f = data[:, 0]
-    n = numSamples or 2 * (f.size - 1)
-    fs = samplingRate or round(f[1] * n)
-    X = data[:, 1::2] + 1j * data[:, 2::2]
-    return SignalObj(np.fft.irfft(X, n, axis=0), 'time', fs)
-
-
-def crossfade_spectra(signal_low, signal_high, freqs):
-    """
-    Spectrum of signal_low below freqs[0] Hz and of signal_high above
-    freqs[1] Hz, with a raised cosine crossfade between them, as
-    ita_xfade_spk; a single frequency takes half of each at that bin.
-    Both signals need the same sampling rate and number of samples.
-
-    >>> combined = pytta.crossfade_spectra(ir_simulated, ir_measured, [200, 400])
-    """
-    fs = signal_low.samplingRate
-    if fs != signal_high.samplingRate:
-        raise ValueError('The signals must have the same sampling rate.')
-    f0, f1 = np.broadcast_to(np.asarray(freqs, dtype=float), (2,))
-    n = signal_low.timeSignal.shape[0]
-    A = np.fft.rfft(signal_low.timeSignal, axis=0)
-    if f0 >= fs / 2:
-        return SignalObj(np.fft.irfft(A, n, axis=0), 'time', fs)
-    B = np.fft.rfft(signal_high.timeSignal, axis=0)
-    b0, b1 = (int(round(f * n / fs)) for f in (f0, min(f1, fs / 2)))
-    if b1 > b0:
-        rise = 0.5 - 0.5 * np.cos(np.pi * np.arange(b1 - b0 + 1) / (b1 - b0))
-    else:
-        rise = np.array([0.5])
-    gain_low = np.zeros(A.shape[0])
-    gain_low[:b0] = 1
-    gain_low[b0:b1 + 1] = 1 - rise
-    gain_high = np.zeros(A.shape[0])
-    gain_high[b1 + 1:] = 1
-    gain_high[b0:b1 + 1] = rise
-    X = A * gain_low[:, None] + B * gain_high[:, None]
-    return SignalObj(np.fft.irfft(X, n, axis=0), 'time', fs)
-
-
-def cut_impulse_train(signal, threshold=0.7, length=1, start_before=0.004, ref_channel=0):
-    """
-    Impulses of an impulse train cut out of signal, as ita_cutImpulseTrain.
-    A sample of ref_channel above the threshold, threshold * L_max +
-    (1 - threshold) * L_rms dB, begins an impulse when it comes length
-    seconds or more after the previous sample above it; each impulse is
-    length seconds from start_before seconds before that sample, cut at the
-    same samples in every channel.
-
-    Returns a list with one SignalObj per channel, whose channels are the
-    impulses, and the 0-based start samples.
-
-    >>> impulses, starts = pytta.cut_impulse_train(take, length=0.5)
-    """
-    fs = signal.samplingRate
-    x = np.asarray(signal.timeSignal)
-    n = x.shape[0]
-    nlen, nbefore = round(length * fs), round(start_before * fs)
-    ref = x[:, ref_channel]
-    with np.errstate(divide='ignore'):
-        level = 20 * np.log10(np.abs(ref))
-    thr = threshold * level.max() + (1 - threshold) * 10 * np.log10(np.mean(ref ** 2))
-    idx = np.flatnonzero(level > thr)
-    idx = idx[idx <= n - nlen + nbefore]
-    idx = idx[np.r_[True, np.diff(idx) >= nlen]] if idx.size else idx
-    starts = idx[idx >= nbefore] - nbefore
-    take = starts[:, None] + np.arange(nlen)
-    return [SignalObj(x[take, c].T, 'time', fs) for c in range(x.shape[1])], starts
-
-
-def velocity_from_pressure_gradient(signal, distance, rho=1.2, c=343, normalized=False):
-    """
-    Particle velocity (m/s) midway between two microphones distance m apart
-    from the pressures of channels 0 and 1 (Pa), by Euler's equation,
-    v = (p0 - p1) / (j omega rho distance), as
-    ita_velocity_from_pressure_gradient; times rho c if normalized. The DC
-    bin is set to zero.
-
-    >>> v = pytta.velocity_from_pressure_gradient(pp_probe, 0.012)
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    if x.shape[1] != 2:
-        raise ValueError('The signal must have two channels.')
-    n = x.shape[0]
-    P = np.fft.rfft(x[:, 0] - x[:, 1])
-    omega = 2 * np.pi * np.fft.rfftfreq(n, 1 / signal.samplingRate)
-    V = np.zeros_like(P)
-    V[1:] = P[1:] / (1j * omega[1:] * rho * distance)
-    if normalized:
-        V *= rho * c
-    return SignalObj(np.fft.irfft(V, n), 'time', signal.samplingRate)
-
-
-def plot_group_delay(*sigObjs, xLim=None, yLim=None, title=None):
-    """
-    Group delay of every channel of the SignalObjs, in ms, on a logarithmic
-    frequency axis, as ita_plot_groupdelay. Returns the Figure.
-
-    >>> pytta.plot_group_delay(ir1, ir2, xLim=[20, 20000])
-    """
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots()
-    for sig in sigObjs:
-        tau = group_delay(sig)
-        for c in range(tau.shape[1]):
-            ax.semilogx(sig.freqVector[1:], 1e3 * tau[1:, c])
-    ax.set(xlabel='Frequency [Hz]', ylabel='Group delay [ms]', xlim=xLim, ylim=yLim, title=title)
-    ax.grid(True, which='both')
-    return fig
-
-
-def plot_nyquist(*sigObjs, title=None):
-    """
-    Imaginary against real part of the spectrum of every channel of the
-    SignalObjs, as ita_plot_nyquist. Returns the Figure.
-    """
-    import matplotlib.pyplot as plt
-    fig, ax = plt.subplots()
-    for sig in sigObjs:
-        X = np.asarray(sig.freqSignal)
-        for c in range(X.shape[1]):
-            ax.plot(X[:, c].real, X[:, c].imag)
-    ax.set(xlabel='Real part', ylabel='Imaginary part', title=title)
-    ax.set_aspect('equal', 'datalim')
-    ax.grid(True)
-    return fig
-
-
-def plot_zplane(zeros, poles, title=None):
-    """
-    Zeros (o) and poles (x) of a discrete-time system on the z plane, with the
-    unit circle, as ita_plot_zplane; scipy.signal.tf2zpk(b, a) gives them
-    from the coefficients. Returns the Figure.
-
-    >>> pytta.plot_zplane(*scipy.signal.tf2zpk(b, a)[:2])
-    """
-    import matplotlib.pyplot as plt
-    zeros, poles = np.atleast_1d(zeros), np.atleast_1d(poles)
-    fig, ax = plt.subplots()
-    w = np.linspace(0, 2 * np.pi, 361)
-    ax.plot(np.cos(w), np.sin(w), 'k:', lw=0.8)
-    ax.plot(zeros.real, zeros.imag, 'o', mfc='none', label='zeros')
-    ax.plot(poles.real, poles.imag, 'x', label='poles')
-    ax.set(xlabel='Real part', ylabel='Imaginary part', title=title)
-    ax.set_aspect('equal', 'datalim')
-    ax.grid(True)
-    ax.legend()
-    return fig
-
-
-def plot_polar(angles, levels, labels=None, rLim=None, title=None):
-    """
-    Directivity in a polar plot, as ita_plot_polar: levels (dB) at the
-    angles (degrees, 0 to the front, counterclockwise), one column per curve,
-    closed at the first angle. Returns the Figure.
-
-    >>> pytta.plot_polar(np.arange(0, 360, 15), L, labels=['1 kHz', '4 kHz'])
-    """
-    import matplotlib.pyplot as plt
-    theta = np.deg2rad(np.r_[angles, angles[0]])
-    levels = np.asarray(levels, dtype=float).reshape(len(angles), -1)
-    levels = np.vstack([levels, levels[:1]])
-    fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
-    ax.set_theta_zero_location('N')
-    for c in range(levels.shape[1]):
-        ax.plot(theta, levels[:, c], label=None if labels is None else labels[c])
-    if rLim is not None:
-        ax.set_rlim(rLim)
-    if labels is not None:
-        ax.legend()
-    ax.set_title(title)
-    return fig
-def _harmonic_matrix(order, gain, phase):
-    # Column k - 1: amplitudes of the harmonics 1 to order that x**k gives for
-    # x = gain cos(wt), divided by gain as the sweep deconvolution does, with
-    # harmonic m turned by (m - 1) phase (Dietrich 2013, sec. 3.3).
-    T = np.zeros((order, order), dtype=complex)
-    for k in range(1, order + 1):
-        T[:k, k - 1] = np.polynomial.chebyshev.poly2cheb(np.eye(k + 1)[k])[1:] * gain ** (k - 1)
-    return T * np.exp(1j * phase * np.arange(order))[:, None]
-
-
-def power_to_harmonic_series(coefficients, gain=1, phase=0):
-    """
-    Harmonic series of a power series, as
-    ita_nonlinear_power_to_harmonic_series: the amplitudes of the harmonics
-    1 to N that y = sum_k a_k x**k gives for a cosine of amplitude gain,
-    divided by gain, from the coefficients a_1 to a_N along the first axis
-    (scalars, or arrays converted entry by entry). Harmonic m is turned by
-    (m - 1) phase, the phase offset of an exponential sweep. The DC term is
-    left out.
-
-    >>> pytta.power_to_harmonic_series([1, 1, 1, 1], gain=0.5)  # 1.1875, 0.3125, 0.0625, 0.015625
-    """
-    a = np.asarray(coefficients)
-    T = _harmonic_matrix(a.shape[0], gain, phase)
-    h = np.tensordot(T, a, axes=1)
-    return h.real if np.isrealobj(a) and phase == 0 else h
-
-
-def harmonic_to_power_series(harmonics, gain=1, phase=0):
-    """
-    Power series coefficients a_1 to a_N of the harmonic series 1 to N, the
-    inverse of power_to_harmonic_series, as
-    ita_nonlinear_harmonic_to_power_series.
-    """
-    h = np.asarray(harmonics)
-    T = _harmonic_matrix(h.shape[0], gain, phase)
-    a = np.tensordot(np.linalg.inv(T), h, axes=1)
-    return a.real if np.isrealobj(h) and phase == 0 else a
-def prony(h, nb, na):
-    """
-    Coefficients b (nb + 1) and a (na + 1, a[0] = 1) of the IIR filter whose
-    impulse response best matches h, by Prony's method (Parks and Burrus,
-    Digital Filter Design, 1987), as the time domain of ita_prony_analysis:
-    the denominator fits the samples after nb by least squares, and the
-    numerator then matches the first nb + 1 samples exactly.
-    scipy.signal.tf2zpk(b, a) gives the zeros and poles.
-
-    >>> b, a = pytta.prony(ir.timeSignal[:, 0], 8, 8)
-    """
-    from scipy.linalg import toeplitz
-    h = np.asarray(h)
-    if h.size <= max(nb, na):
-        h = np.pad(h, (0, max(nb, na) + 1 - h.size))
-    H = toeplitz(h, np.r_[h[0], np.zeros(na)])
-    a = np.r_[1, -np.linalg.lstsq(H[nb + 1:, 1:], H[nb + 1:, 0], rcond=None)[0]]
-    return H[:nb + 1] @ a, a
-
-
-def invfreqz(H, w, nb, na, weights=None):
-    """
-    Real coefficients b (nb + 1) and a (na + 1, a[0] = 1) of the IIR filter
-    whose frequency response fits H at the normalized frequencies w (rad per
-    sample), by the linear equation error method of Levi (Complex curve
-    fitting, IRE Trans. Automatic Control 4(1), 1959), minimizing
-    sum weights |B(w) - H(w) A(w)|^2, as MATLAB's invfreqz without
-    iterations and the frequency domain of ita_prony_analysis.
-
-    >>> b, a = pytta.invfreqz(H, 2 * np.pi * f / fs, 8, 8)
-    """
-    H, w = np.asarray(H), np.asarray(w)
-    E = np.exp(-1j * np.outer(w, np.arange(max(nb, na) + 1)))
-    M = np.hstack([E[:, :nb + 1], -H[:, None] * E[:, 1:na + 1]])
-    sw = np.sqrt(np.ones(w.size) if weights is None else np.asarray(weights))[:, None]
-    x = np.linalg.lstsq(np.vstack([(sw * M).real, (sw * M).imag]),
-                        np.r_[(sw[:, 0] * H).real, (sw[:, 0] * H).imag], rcond=None)[0]
-    return x[:nb + 1], np.r_[1, x[nb + 1:]]
-def bark_warping(samplingRate):
-    """
-    Warping coefficient that makes the frequency axis approach the Bark
-    scale, 0.8517 sqrt(arctan(0.06583 fs / 1000)) - 0.1916 (Smith and Abel,
-    Bark and ERB bilinear transforms, IEEE Trans. Speech Audio Process. 7(6),
-    1999), as the barkwarp of the ITA-Toolbox.
-    """
-    return 0.8517 * np.sqrt(np.arctan(0.06583 * samplingRate / 1000)) - 0.1916
-
-
-def warp(signal, lam, numSamples=None):
-    """
-    Frequency warped signal, as ita_audio_warp: every delay z^-1 of the
-    signal, taken as an FIR filter, is replaced by the allpass
-    (z^-1 - lam) / (1 - lam z^-1), so that the new spectrum at omega is the
-    old one at omega + 2 arctan(lam sin(omega) / (1 - lam cos(omega))).
-    Positive lam stretches the low frequencies; warp with -lam undoes it.
-    The result has numSamples samples (those of signal if None).
-
-    >>> w = pytta.warp(ir, pytta.bark_warping(ir.samplingRate))
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    n = numSamples or x.shape[0]
-    y = np.zeros((n, x.shape[1]))
-    g = np.zeros(n)
-    g[0] = 1
-    for k in range(x.shape[0]):
-        y += g[:, None] * x[k]
-        g = ss.lfilter([-lam, 1], [1, -lam], g)
-    return SignalObj(y, 'time', signal.samplingRate)
-
-
-def warp_zpk(z, p, k, lam):
-    """
-    Zeros, poles and gain of the filter H(D(z)) with z^-1 replaced by the
-    allpass D(z) = (z^-1 - lam) / (1 - lam z^-1), as ita_zpk_warp: each root
-    r moves to (r + lam) / (1 + lam r), and the difference between the
-    numbers of zeros and poles leaves roots at lam. warp_zpk with -lam undoes
-    it.
-    """
-    z, p = np.atleast_1d(z).astype(complex), np.atleast_1d(p).astype(complex)
-    k = k * np.prod(1 + lam * z) / np.prod(1 + lam * p)
-    extra = np.full(abs(z.size - p.size), lam, dtype=complex)
-    zw, pw = (z + lam) / (1 + lam * z), (p + lam) / (1 + lam * p)
-    if z.size > p.size:
-        pw = np.r_[pw, extra]
-    else:
-        zw = np.r_[zw, extra]
-    return zw, pw, k.real if abs(k.imag) <= 1e-12 * abs(k) else k
-
 
 def fft_degree(*args,**kwargs):
     """

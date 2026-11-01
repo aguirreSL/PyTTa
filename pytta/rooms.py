@@ -27,6 +27,7 @@ Available functions:
     >>> pytta.rooms.din18041(volume, purpose)
     >>> pytta.rooms.rectangular_room_frf(dimensions, source, receiver, freqs, T)
     >>> pytta.rooms.rectangular_room_ir(dimensions, source, receiver, fs, nSamples, T)
+    >>> pytta.rooms.image_source_ir(dimensions, source, receiver, fs, duration)
 
 Authors:
     João Vitor Gutkoski Paes, joao.paes@eac.ufsm.br
@@ -545,6 +546,14 @@ def rectangular_room_frf(dimensions, source, receiver, frequencies, T=2.,
     L_N = V prod(1 for n = 0, 1/2 otherwise), w_N = pi c sqrt(sum (n/L)^2)
     and d = 3 ln(10) / T for every mode. Time dependence exp(j w t), the
     convention of numpy.fft, so the impulse response is causal.
+def image_source_ir(dimensions, source, receiver, samplingRate, duration,
+                    reflection=1., c=343.2, half_width=8):
+    """
+    Impulse response of a rectangular room by the image source method of
+    Allen and Berkley (1979), as ita_roomacoustics_imagesources: the free
+    field Green's function delta(t - d/c) / (4 pi d) of every image source
+    within duration, weighted by the reflection factors of the walls it
+    goes through.
 
     Parameters
     ----------
@@ -557,6 +566,27 @@ def rectangular_room_frf(dimensions, source, receiver, frequencies, T=2.,
     f_max : float, optional
         Highest mode frequency; by default 1.2 times the highest frequency.
     """
+        (Lx, Ly, Lz) and the positions (m), with 0 <= x <= Lx.
+    samplingRate : int
+    duration : float
+        Length of the response (s); image sources farther than c duration
+        are left out.
+    reflection : float or array_like
+        Pressure reflection factor of every wall, or six of them for the
+        walls x = 0, x = Lx, y = 0, y = Ly, z = 0, z = Lz (frequency and
+        angle independent; ita_roomacoustics_imagesources derives them
+        from a wall impedance Z as (Z - rho c) / (Z + rho c)). Default 1.
+    half_width : int
+        Half length in samples of the Hann-windowed sinc that places each
+        arrival between samples. Default 8.
+
+    Returns
+    -------
+    SignalObj
+        The response; convolved with rho dQ/dt of the source (Q the volume
+        velocity) it gives the pressure.
+    """
+    from pytta.classes import SignalObj
     L = np.asarray(dimensions, dtype=float)
     r0, r = np.asarray(source, dtype=float), np.asarray(receiver, dtype=float)
     if np.any(r0 < 0) or np.any(r0 > L) or np.any(r < 0) or np.any(r > L):
@@ -603,4 +633,38 @@ def rectangular_room_ir(dimensions, source, receiver, samplingRate, numSamples,
     fade = np.clip((f - f_max) / max(nyq - f_max, 1e-12), 0, 1)
     H = H * 0.5 * (1 + np.cos(np.pi * fade))
     return SignalObj(np.fft.irfft(H, numSamples), 'time', samplingRate,
+    beta = np.broadcast_to(np.asarray(reflection, dtype=float), (6,))
+    n = int(round(duration * samplingRate))
+    out = np.zeros(n + 2 * half_width + 1)
+    reach = c * duration
+    lmax = [int(np.ceil(reach / (2 * L[i]))) + 1 for i in range(3)]
+    k = np.arange(-half_width, half_width + 1)
+    # per axis: image coordinates, distances and reflection weights of
+    # x = 2 l Lx + (1 - 2u) x0 (u = 0, 1): |l - u| reflections at x = 0 and
+    # |l| at x = Lx
+    axes = []
+    for i in range(3):
+        ls = np.arange(-lmax[i], lmax[i] + 1)
+        coord, weight = [], []
+        for u in (0, 1):
+            coord.append(2 * ls * L[i] + (1 - 2 * u) * r0[i] - r[i])
+            weight.append(beta[2 * i] ** np.abs(ls - u) * beta[2 * i + 1] ** np.abs(ls))
+        axes.append((np.concatenate(coord), np.concatenate(weight)))
+    (dx, wx), (dy, wy), (dz, wz) = axes
+    d2xy = dx[:, None] ** 2 + dy[None, :] ** 2
+    wxy = wx[:, None] * wy[None, :]
+    for z, w in zip(dz, wz):
+        d = np.sqrt(d2xy + z ** 2).ravel()
+        keep = d <= reach
+        if not np.any(keep):
+            continue
+        d, a = d[keep], (wxy.ravel() * w)[keep] / (4 * np.pi * d[keep])
+        t = d / c * samplingRate
+        i0 = np.floor(t).astype(int)
+        frac = t - i0
+        x = k[None, :] - frac[:, None]
+        kernel = np.sinc(x) * 0.5 * (1 + np.cos(np.pi * x / (half_width + 1)))
+        idx = i0[:, None] + k[None, :] + half_width
+        np.add.at(out, idx.ravel(), (a[:, None] * kernel).ravel())
+    return SignalObj(out[half_width:half_width + n], 'time', samplingRate,
                      signalType='energy')

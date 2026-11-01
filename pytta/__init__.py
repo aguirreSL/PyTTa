@@ -182,6 +182,7 @@ from .functions import read_wav, write_wav, merge, split, \
     peak_time, save, load, plot_time, plot_time_dB, plot_freq,\
     plot_bars, plot_spectrogram, plot_waterfall, SPL,\
     dither, impulsive_noise, invert_spectrum, merge_near_far
+    multiple_sweep_excitation, multiple_sweep_irs, triggered_average
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -288,6 +289,9 @@ __all__ = [  # Apps
            'impulsive_noise',
            'invert_spectrum',
            'merge_near_far',
+           'multiple_sweep_excitation',
+           'multiple_sweep_irs',
+           'triggered_average',
            'save',
            'load',
            'weighting',

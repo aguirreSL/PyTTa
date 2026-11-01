@@ -73,3 +73,6 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.impulsive_noise
 .. autofunction:: pytta.invert_spectrum
 .. autofunction:: pytta.merge_near_far
+.. autofunction:: pytta.multiple_sweep_excitation
+.. autofunction:: pytta.multiple_sweep_irs
+.. autofunction:: pytta.triggered_average

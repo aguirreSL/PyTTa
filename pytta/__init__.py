@@ -101,6 +101,8 @@ Modules:
     * pytta.e2611:
         normal incidence sound transmission in a four-microphone tube
         (ASTM E2611);
+    * pytta.fem:
+        finite elements for the Helmholtz equation in air;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -161,6 +163,7 @@ from . import absorbers
 from . import analytic
 from . import fourpole
 from . import e2611
+from . import fem
 
 from .functions import (
     read_wav, write_wav, merge, split, list_devices, print_devices,
@@ -225,6 +228,7 @@ __all__ = [  # Apps
            'analytic',
            'fourpole',
            'e2611',
+           'fem',
            'rooms',
 
            # Functions

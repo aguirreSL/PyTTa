@@ -102,4 +102,5 @@ Modules:
    analytic
    fourpole
    e2611
+   fem
    properties

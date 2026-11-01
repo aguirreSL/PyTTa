@@ -58,3 +58,7 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.crossfade_spectra
 .. autofunction:: pytta.cut_impulse_train
 .. autofunction:: pytta.velocity_from_pressure_gradient
+.. autofunction:: pytta.plot_group_delay
+.. autofunction:: pytta.plot_nyquist
+.. autofunction:: pytta.plot_zplane
+.. autofunction:: pytta.plot_polar

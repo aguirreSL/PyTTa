@@ -177,6 +177,9 @@ from .functions import read_wav, write_wav, merge, split, \
     read_audio, write_audio, read_blockwise, write_txt, read_txt
     plot_bars, plot_spectrogram, plot_waterfall, SPL,\
     crossfade_spectra, cut_impulse_train, velocity_from_pressure_gradient
+    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
+    group_delay, coherence, cepstrum, icepstrum, mls_deconvolution,\
+    plot_group_delay, plot_nyquist, plot_zplane, plot_polar
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -267,6 +270,10 @@ __all__ = [  # Apps
            'crossfade_spectra',
            'cut_impulse_train',
            'velocity_from_pressure_gradient',
+           'plot_group_delay',
+           'plot_nyquist',
+           'plot_zplane',
+           'plot_polar',
            'save',
            'load',
            'weighting',

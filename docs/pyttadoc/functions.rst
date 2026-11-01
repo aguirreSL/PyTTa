@@ -44,3 +44,6 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.zero_phase
 .. autofunction:: pytta.randomize_phase
 .. autofunction:: pytta.quantize
+.. autofunction:: pytta.butterworth
+.. autofunction:: pytta.notch
+.. autofunction:: pytta.peak_eq

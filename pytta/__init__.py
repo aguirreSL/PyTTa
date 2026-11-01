@@ -105,6 +105,8 @@ Modules:
         finite elements for the Helmholtz equation in air;
     * pytta.bem:
         boundary elements for radiation into free field;
+    * pytta.rays:
+        stochastic ray tracing in convex rooms;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -167,6 +169,7 @@ from . import fourpole
 from . import e2611
 from . import fem
 from . import bem
+from . import rays
 
 from .functions import (
     read_wav, write_wav, merge, split, list_devices, print_devices,
@@ -233,6 +236,7 @@ __all__ = [  # Apps
            'e2611',
            'fem',
            'bem',
+           'rays',
            'rooms',
 
            # Functions

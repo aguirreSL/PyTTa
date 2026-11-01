@@ -104,4 +104,5 @@ Modules:
    e2611
    fem
    bem
+   rays
    properties

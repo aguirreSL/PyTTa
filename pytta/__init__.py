@@ -185,6 +185,8 @@ from .functions import read_wav, write_wav, merge, split, \
     multiple_sweep_excitation, multiple_sweep_irs, triggered_average
     pitch_detection, wiener_hopf, normxcorr2
     group_delay, coherence, cepstrum, icepstrum, mls_deconvolution, lifter
+    plot_bars, plot_spectrogram, plot_waterfall, SPL, smooth_frequency,\
+    smooth_notches
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -298,6 +300,7 @@ __all__ = [  # Apps
            'wiener_hopf',
            'normxcorr2',
            'lifter',
+           'smooth_notches',
            'save',
            'load',
            'weighting',

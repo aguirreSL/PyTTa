@@ -106,5 +106,6 @@ Modules:
    bem
    rays
    mesh
+   iso11654
    properties
    ita_migration

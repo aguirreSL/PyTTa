@@ -109,6 +109,8 @@ Modules:
         stochastic ray tracing in convex rooms;
     * pytta.mesh:
         meshes for finite and boundary elements;
+    * pytta.iso11654:
+        rating of sound absorption (ISO 11654);
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -173,6 +175,7 @@ from . import fem
 from . import bem
 from . import rays
 from . import mesh
+from . import iso11654
 
 from .functions import (
     read_wav, write_wav, merge, split, list_devices, print_devices,
@@ -233,6 +236,7 @@ __all__ = [  # Apps
            'bem',
            'rays',
            'mesh',
+           'iso11654',
            'rooms',
 
            # Functions

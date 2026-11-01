@@ -102,4 +102,5 @@ Modules:
    iso532_2
    absorbers
    analytic
+   fourpole
    properties

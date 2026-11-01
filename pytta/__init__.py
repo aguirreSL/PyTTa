@@ -98,6 +98,8 @@ Modules:
         surface impedance and absorption of layered absorbers;
     * pytta.analytic:
         analytic sound fields of point sources, plane waves and a sphere;
+    * pytta.fourpole:
+        four-pole matrices of lumped elements;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -156,6 +158,7 @@ from . import ambisonics
 from . import iso532_2
 from . import absorbers
 from . import analytic
+from . import fourpole
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -209,6 +212,7 @@ __all__ = [  # Apps
            'iso532_2',
            'absorbers',
            'analytic',
+           'fourpole',
            'rooms',
 
            # Functions

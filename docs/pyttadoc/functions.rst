@@ -55,3 +55,6 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.read_blockwise
 .. autofunction:: pytta.write_txt
 .. autofunction:: pytta.read_txt
+.. autofunction:: pytta.crossfade_spectra
+.. autofunction:: pytta.cut_impulse_train
+.. autofunction:: pytta.velocity_from_pressure_gradient

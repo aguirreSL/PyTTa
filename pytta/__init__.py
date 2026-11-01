@@ -162,6 +162,8 @@ from .functions import read_wav, write_wav, merge, split, \
     zero_phase, randomize_phase, quantize
     plot_bars, plot_spectrogram, plot_waterfall, SPL,\
     butterworth, notch, peak_eq
+    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
+    psd, interpolate_spectrum, extrapolate_low
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -238,6 +240,9 @@ __all__ = [  # Apps
            'butterworth',
            'notch',
            'peak_eq',
+           'psd',
+           'interpolate_spectrum',
+           'extrapolate_low',
            'save',
            'load',
            'weighting',

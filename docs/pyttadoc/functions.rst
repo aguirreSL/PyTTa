@@ -47,3 +47,6 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.butterworth
 .. autofunction:: pytta.notch
 .. autofunction:: pytta.peak_eq
+.. autofunction:: pytta.psd
+.. autofunction:: pytta.interpolate_spectrum
+.. autofunction:: pytta.extrapolate_low

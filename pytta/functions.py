@@ -212,6 +212,75 @@ def merge(signal1, *signalObjects):
     return newSignal
 
 
+def smooth_notches(signalObj, nthOct=3, threshold=3., squeeze=0.3):
+    """
+    Spectrum with its notches made shallower, for loudspeaker equalization,
+    by the "compare and squeeze" of ita_smooth_notches (after S. Mueller):
+    the magnitude is compared with its smoothing over 1 / nthOct octave
+    (smooth_frequency), every notch deeper than threshold dB below it is
+    taken from where the magnitude last crossed the smoothed one to where
+    it crosses it again, and there the ratio r of the two is raised to
+    squeeze, so that the notch keeps squeeze times its depth in dB. With
+    threshold 0 every bin below the smoothed curve is squeezed. The phase
+    is kept. Returns a SignalObj.
+    """
+    spectrum = np.array(signalObj.freqSignal, dtype=complex, ndmin=2)
+    smooth = np.array(smooth_frequency(signalObj, nthOct).freqSignal, dtype=complex, ndmin=2)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ratio = np.abs(spectrum) / np.abs(smooth)
+    window = np.ones_like(ratio)
+    for ch in range(ratio.shape[1]):
+        r = ratio[:, ch]
+        if not threshold:
+            window[:, ch] = np.minimum(r, 1)
+            continue
+        notch = r < 10 ** (-abs(threshold) / 20)
+        notch[0] = notch[1]
+        edges = np.diff(notch.astype(int))
+        for s, e in zip(np.flatnonzero(edges == 1) + 1, np.flatnonzero(edges == -1)):
+            above = np.flatnonzero(r[:s] > 1)
+            start = above[-1] + 1 if above.size else 0
+            above = np.flatnonzero(r[e:] > 1)
+            stop = e + above[0] if above.size else r.size
+            window[start:stop, ch] = r[start:stop]
+    with np.errstate(divide='ignore', invalid='ignore'):
+        window = window ** -(1 - squeeze)
+    window[~np.isfinite(window)] = 1
+    newSignal = SignalObj(window * spectrum, 'freq',
+                          samplingRate=signalObj.samplingRate,
+                          numSamples=signalObj.numSamples,
+                          signalType=signalObj.signalType,
+                          freqMin=signalObj.freqMin,
+                          freqMax=signalObj.freqMax,
+                          comment=signalObj.comment)
+    newSignal.channels = cp.deepcopy(signalObj.channels)
+    return newSignal
+
+
+def lifter(signal, n=None, alpha=0.):
+    """
+    Low-pass lifter, as ita_lifter: the complex cepstrum of each channel
+    (cepstrum, which removes the integer delay) is multiplied by a Tukey
+    window of 2 n + 1 quefrencies centred on zero (alpha 0 rectangular,
+    1 Hann) and transformed back with the delay (icepstrum), which smooths
+    the log magnitude and the phase of the spectrum together. n defaults
+    to a quarter of the length; from half the length on nothing is done.
+
+    >>> smooth = pytta.lifter(ir, 64, 0.5)
+    """
+    N = signal.numSamples
+    n = int(np.ceil(N / 4)) if n is None else int(n)
+    if n >= np.ceil(N / 2):
+        warn('lifter: the window is too long, nothing is done.')
+        return _cepstrum_signal(signal, np.asarray(signal.timeSignal, dtype=float))
+    win = np.zeros(N)
+    win[:2 * n + 1] = ss.windows.tukey(2 * n + 1, alpha)
+    win = np.roll(win, -n)
+    c, delay = cepstrum(signal)
+    lifted = _cepstrum_signal(c, np.asarray(c.timeSignal, dtype=float) * win[:, None])
+    return icepstrum(lifted, delay)
+
+
 def plot_group_delay(*sigObjs, xLim=None, yLim=None, title=None):
     """
     Group delay of every channel of the SignalObjs, in ms, on a logarithmic
@@ -386,6 +455,302 @@ def peak_time(signal):
     else:
         return peaks_time[0]
 
+def pitch_detection(signal, fmin=10., fmax=None, blockSize=None, overlap=0.,
+                    overtones=5, maxPitches=1, minDistance=10.,
+                    minConfidence=0.1, fftDegree=16):
+    """
+    Pitch of every block of the first channel by the cepstrum biased
+    harmonic product spectrum of ita_pitch_detection: the magnitude
+    spectrum of the Hann windowed block (zero padded to 2**fftDegree) is
+    multiplied by itself decimated by 2 to overtones + 1 (the harmonic
+    product spectrum, Noll 1969) and by the magnitude of the real cepstrum
+    at the quefrency of each bin. The highest peak between fmin and fmax is
+    the pitch; with maxPitches > 1 the band of minDistance Hz around each
+    peak is cleared and the next is taken. The confidence of a pitch is the
+    share of the energy of the harmonic product spectrum within that band,
+    times the number of pitches found (at most 1); pitches below
+    minConfidence are nan.
+
+    Returns (pitch, confidence), arrays of shape (maxPitches, blocks), and
+    the time (s) of the start of each block.
+    """
+    fs = signal.samplingRate
+    x = np.asarray(signal.timeSignal[:, 0], dtype=float)
+    size = blockSize or x.size
+    hop = max(1, int(round(size * (1 - overlap))))
+    n = max(2 ** fftDegree, size)
+    f = np.fft.rfftfreq(n, 1 / fs)
+    band = np.flatnonzero((f > fmin) & (f < (fmax or fs / 2)))
+    half = max(1, int(np.ceil(minDistance / f[1] / 2)))
+    starts = np.arange(0, x.size, hop)
+    pitch = np.full((maxPitches, starts.size), np.nan)
+    confidence = np.zeros((maxPitches, starts.size))
+    for b, s in enumerate(starts):
+        block = x[s:s + size]
+        block = np.pad(block * np.hanning(block.size), (0, n - block.size))
+        X = np.abs(np.fft.rfft(block))
+        hps = X.copy()
+        for a in range(2, overtones + 2):
+            down = X[::a]
+            hps[:down.size] *= down
+            hps[down.size:] = 0
+        with np.errstate(divide='ignore'):
+            ceps = np.abs(np.fft.irfft(np.log(np.maximum(X, 1e-300)), n))
+        bias = np.zeros_like(hps)
+        bias[band] = ceps[np.minimum(n // band, n - 1)]
+        score, energy = hps * bias, hps.copy()
+        total = np.sum(energy[band] ** 2)
+        found = 0
+        for p in range(maxPitches):
+            k = band[np.argmax(score[band])]
+            if score[k] <= 0 or total == 0:
+                break
+            near = slice(max(band[0], k - half), min(band[-1], k + half) + 1)
+            pitch[p, b] = f[k]
+            confidence[p, b] = np.sum(energy[near] ** 2) / total
+            score[near] = 0
+            energy[near] = 0
+            found += 1
+        confidence[:, b] = np.minimum(confidence[:, b] * max(found, 1), 1)
+    pitch[confidence < minConfidence] = np.nan
+    confidence[confidence < minConfidence] = 0
+    return pitch, confidence, starts / fs
+
+
+def wiener_hopf(signal, invert=False):
+    """
+    Wiener-Hopf factorization of every channel into a causal and an
+    anticausal part whose spectra multiply to the spectrum of signal, by
+    splitting the complex cepstrum (log magnitude and unwrapped phase) at
+    quefrency zero, half of the zero and middle quefrencies to each, as
+    ita_wiener_hopf_factorization. With invert, the factors of the
+    inverse spectrum are returned. Returns (plus, minus).
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    n = x.shape[0]
+    m = n // 2
+    X = np.fft.fft(x, axis=0)
+    phase = np.unwrap(np.angle(X[:m + 1]), axis=0)
+    phase = np.vstack([phase, -phase[1:(n + 1) // 2][::-1]])
+    c = np.fft.ifft((-1 if invert else 1) * (np.log(np.abs(X)) + 1j * phase), axis=0)
+    plus, minus = np.zeros_like(c), np.zeros_like(c)
+    plus[0] = minus[0] = c[0] / 2
+    plus[1:m] = c[1:m]
+    minus[n - m + 1:] = c[n - m + 1:]
+    if n % 2 == 0:
+        plus[m] = minus[m] = c[m] / 2
+    out = [np.fft.ifft(np.exp(np.fft.fft(q, axis=0)), axis=0).real for q in (plus, minus)]
+    return tuple(SignalObj(o, 'time', signal.samplingRate) for o in out)
+
+
+def normxcorr2(template, image):
+    """
+    Normalized two-dimensional cross-correlation of template with image,
+    as MATLAB's normxcorr2 that ita_normxcorr2 applies to array data: at
+    every lag of the full correlation (shape image + template - 1), the
+    correlation of the zero-mean template with the part of image under it,
+    divided by both standard deviations (Lewis, Fast normalized
+    cross-correlation, Vision Interface 1995). Values lie in [-1, 1]; lags
+    where the image is constant give 0.
+    """
+    t = np.asarray(template, dtype=float)
+    a = np.asarray(image, dtype=float)
+    t = t - t.mean()
+    ones = np.ones_like(t)
+    num = ss.fftconvolve(a, t[::-1, ::-1])
+    s1 = ss.fftconvolve(a, ones)
+    s2 = ss.fftconvolve(a ** 2, ones)
+    var_a = np.maximum(s2 - s1 ** 2 / t.size, 0)
+    den = np.sqrt(var_a * np.sum(t ** 2))
+    with np.errstate(divide='ignore', invalid='ignore'):
+        r = np.where(den > 1e-12 * den.max(), num / den, 0)
+    return np.clip(r, -1, 1)
+
+
+def multiple_sweep_excitation(sweep, numSources, delay, tail=0.):
+    """
+    Excitation of the multiple exponential sweep method (Majdak, Balazs and
+    Laback, Multiple exponential sweep method for fast measurement of
+    head-related transfer functions, J. Audio Eng. Soc. 55(7/8), 2007), the
+    interleaved and MIMO measurements of the ITA-Toolbox: channel k plays
+    sweep delayed by k delay seconds, with tail seconds of silence at the
+    end for the last responses. delay must exceed the length of the
+    impulse responses plus the advance of the harmonics that matter.
+    """
+    fs = sweep.samplingRate
+    s = np.asarray(sweep.timeSignal[:, 0], dtype=float)
+    d = int(round(delay * fs))
+    x = np.zeros((s.size + (numSources - 1) * d + int(round(tail * fs)), numSources))
+    for k in range(numSources):
+        x[k * d:k * d + s.size, k] = s
+    return SignalObj(x, 'time', fs, freqMin=sweep.freqMin, freqMax=sweep.freqMax)
+
+
+def multiple_sweep_irs(recording, sweep, numSources, delay, irLength,
+                       pretime=0.005, regularization=True):
+    """
+    Impulse responses of each source to every input channel from a
+    recording of multiple_sweep_excitation: the recording is deconvolved
+    with the single sweep by ImpulsiveResponse, regularized between the
+    freqMin and freqMax of sweep unless regularization is False, and the
+    response of source k is cut from pretime seconds before k delay,
+    irLength seconds long, so that the onset of the band-limited impulse is
+    kept. The regularization limits the band and so spreads each impulse
+    in time, and part of it falls in the windows of the other sources
+    (about 1 % with the default band); without it the division is exact
+    but raises the noise outside the band of the sweep. Returns one
+    SignalObj per source, with one channel per input channel.
+    """
+    fs = recording.samplingRate
+    n = recording.timeSignal.shape[0]
+    s = np.zeros(n)
+    s[:sweep.timeSignal.shape[0]] = sweep.timeSignal[:, 0]
+    excitation = SignalObj(s, 'time', fs, freqMin=sweep.freqMin, freqMax=sweep.freqMax)
+    ir = ImpulsiveResponse(excitation, recording, 'linear', regularization=regularization)
+    h = np.asarray(ir.IR.timeSignal, dtype=float)
+    d, m = int(round(delay * fs)), int(round(irLength * fs))
+    h = np.roll(h, int(round(pretime * fs)), axis=0)
+    return [SignalObj(h[k * d:k * d + m], 'time', fs) for k in range(numSources)]
+
+
+def triggered_average(recording, threshold, duration, pretime=0., channel=0):
+    """
+    Average of the events of a triggered measurement (e.g. impact hammer),
+    as ita_measurement_trigger: an event starts where the trigger channel
+    first exceeds threshold dB re full scale after the previous event, and
+    is cut from pretime seconds before that sample, duration seconds long,
+    in every channel. Returns (mean SignalObj, list of the events).
+    """
+    fs = recording.samplingRate
+    x = np.asarray(recording.timeSignal, dtype=float)
+    pre, m = int(round(pretime * fs)), int(round(duration * fs))
+    above = np.flatnonzero(np.abs(x[:, channel]) > 10 ** (threshold / 20))
+    runs, end = [], -1
+    for i in above:
+        if i >= end and i - pre >= 0 and i - pre + m <= x.shape[0]:
+            runs.append(SignalObj(x[i - pre:i - pre + m], 'time', fs))
+            end = i - pre + m
+    if not runs:
+        raise ValueError('No event above the threshold.')
+    mean = np.mean([r.timeSignal for r in runs], axis=0)
+    return SignalObj(mean, 'time', fs), runs
+
+
+def dither(signal, bits=24, kind='tri', quiet=False, seed=None):
+    """
+    signal (full scale 1) with dither noise added before it is quantized to
+    bits bits, so that the quantization error becomes noise independent of
+    the signal, as ita_dither (Lipshitz, Wannamaker and Vanderkooy,
+    Quantization and dither: a theoretical survey, J. Audio Eng. Soc.
+    40(5), 1992). kind 'rect' is uniform over one step, 'tri' (triangular,
+    two steps wide) makes the mean and the power of the error independent
+    of the signal, and 'gauss' has a standard deviation of half a step. With
+    quiet, samples equal to zero get no dither.
+    """
+    rng = np.random.default_rng(seed)
+    x = np.asarray(signal.timeSignal, dtype=float)
+    step = 2.0 ** (1 - bits)
+    if kind == 'rect':
+        d = rng.uniform(-step / 2, step / 2, x.shape)
+    elif kind == 'tri':
+        d = rng.uniform(-step / 2, step / 2, x.shape) + rng.uniform(-step / 2, step / 2, x.shape)
+    elif kind == 'gauss':
+        d = rng.normal(0, step / 2, x.shape)
+    else:
+        raise ValueError("kind must be 'rect', 'tri' or 'gauss'.")
+    if quiet:
+        d[x == 0] = 0
+    return SignalObj(x + d, 'time', signal.samplingRate)
+
+
+def impulsive_noise(ir, excitation, noise_start, threshold=20):
+    """
+    Detection of an impulsive event during a sweep measurement, as
+    ita_impulsiveNoiseDetection: the part of the impulse response ir after
+    noise_start seconds, where it holds only noise, is convolved again with
+    the excitation (circularly, at the length of ir) to rebuild the
+    background noise of the recording, and L_max_rms = 20 lg(max |n| /
+    rms(n)) of that noise is compared with threshold (dB). Stationary noise
+    gives 12 to 14 dB.
+
+    Returns (detected, L_max_rms, background noise SignalObj).
+    """
+    h = np.asarray(ir.timeSignal[:, 0], dtype=float).copy()
+    h[:int(round(noise_start * ir.samplingRate))] = 0
+    x = np.asarray(excitation.timeSignal[:, 0], dtype=float)
+    n = np.fft.irfft(np.fft.rfft(h) * np.fft.rfft(x, h.size), h.size)
+    level = 20 * np.log10(np.abs(n).max() / np.sqrt(np.mean(n ** 2)))
+    return level > threshold, level, SignalObj(n, 'time', ir.samplingRate)
+
+
+def _log_crossfade(f, f0, f1):
+    # 0 below f0, 1 above f1, raised cosine on a logarithmic axis between.
+    with np.errstate(divide='ignore'):
+        u = np.clip(np.log(f / f0) / np.log(f1 / f0), 0, 1)
+    return 0.5 - 0.5 * np.cos(np.pi * np.nan_to_num(u))
+
+
+def invert_spectrum(signal, freqRange, minimum_phase=False):
+    """
+    Regularized inverse of the spectrum of signal, C = conj(H) / (|H|^2 +
+    eps) (Kirkeby, Rubak, Nelson and Farina, Design of cross-talk
+    cancellation networks by using fast deconvolution, 1999), with eps
+    negligible inside freqRange = [fmin, fmax] and half the largest |H|^2
+    outside it, crossfaded over half an octave, the rule of the
+    regularization of ImpulsiveResponse. With minimum_phase, the inverse
+    gets the minimum phase of its magnitude, as
+    ita_invert_spk_minphase_regularization.
+    """
+    x = np.asarray(signal.timeSignal, dtype=float)
+    n = x.shape[0]
+    H = np.fft.rfft(x, axis=0)
+    f = np.fft.rfftfreq(n, 1 / signal.samplingRate)
+    fmin, fmax = freqRange
+    outside = 1 - _log_crossfade(f, fmin / np.sqrt(2), fmin) \
+        + _log_crossfade(f, fmax, fmax * np.sqrt(2))
+    eps = (1e-10 + outside[:, None]) * (np.abs(H) ** 2).max(axis=0) / 2
+    C = np.conj(H) / (np.abs(H) ** 2 + eps)
+    if minimum_phase:
+        # Homomorphic: fold the real cepstrum of log |C| onto positive times.
+        c = np.fft.irfft(np.log(np.abs(C)), n, axis=0)
+        fold = np.zeros(n)
+        fold[0] = 1
+        fold[1:(n + 1) // 2] = 2
+        if n % 2 == 0:
+            fold[n // 2] = 1
+        C = np.exp(np.fft.rfft(c * fold[:, None], axis=0))
+    return SignalObj(np.fft.irfft(C, n, axis=0), 'time', signal.samplingRate)
+
+
+def merge_near_far(near, far, crossover, order=4, port=None, port_ratio=1.):
+    """
+    Loudspeaker response from a near-field measurement below crossover (Hz)
+    and a far-field one above it, as
+    ita_add_nearfield_farfield_measurements (Keele, Low-frequency
+    loudspeaker assessment by nearfield sound-pressure measurement, J.
+    Audio Eng. Soc. 22(3), 1974). The near-field response, with the port
+    one times port_ratio (port radius over diaphragm radius) added for a
+    vented box, is delayed to the far-field one (find_delay) and scaled to
+    its level over the third octave around the crossover, and the two are
+    crossfaded with the power-complementary weights 1 / (1 + (f/fc)^(2
+    order)) and its complement, which add up to 1.
+    """
+    fs = far.samplingRate
+    m = np.asarray(near.timeSignal[:, 0], dtype=float)
+    if port is not None:
+        m = m + port_ratio * np.asarray(port.timeSignal[:, 0], dtype=float)
+    x = np.asarray(far.timeSignal[:, 0], dtype=float)
+    n = x.size
+    f = np.fft.rfftfreq(n, 1 / fs)
+    lag = np.argmax(ss.correlate(x, m, mode='full', method='fft')) - (m.size - 1)
+    M = np.fft.rfft(m, n) * np.exp(-2j * np.pi * f * lag / fs)
+    X = np.fft.rfft(x)
+    band = (f >= crossover * 2 ** (-1 / 6)) & (f <= crossover * 2 ** (1 / 6))
+    M *= np.sqrt(np.sum(np.abs(X[band]) ** 2) / np.sum(np.abs(M[band]) ** 2))
+    low = 1 / (1 + (f / crossover) ** (2 * order))
+    return SignalObj(np.fft.irfft(low * M + (1 - low) * X, n), 'time', fs)
+
+
 def bark_warping(samplingRate):
     """
     Warping coefficient that makes the frequency axis approach the Bark
@@ -475,6 +840,32 @@ def invfreqz(H, w, nb, na, weights=None):
     x = np.linalg.lstsq(np.vstack([(sw * M).real, (sw * M).imag]),
                         np.r_[(sw[:, 0] * H).real, (sw[:, 0] * H).imag], rcond=None)[0]
     return x[:nb + 1], np.r_[1, x[nb + 1:]]
+
+
+def extrapolate(signal, freqRange, order=4):
+    """
+    Spectrum outside freqRange = [f1, f2] (Hz) replaced by IIR models of
+    order order fitted with invfreqz near each end, as ita_extrapolate:
+    the low model on f1 + (0.01 to 0.2)(f2 - f1), used below f1, and the
+    high model on f1 + (0.9 to 0.99)(f2 - f1), used above f2, the bands
+    of the ITA-Toolbox. A pure delay should be removed first (time_shift),
+    since it is not a low-order model.
+    """
+    fs = signal.samplingRate
+    x = np.asarray(signal.timeSignal, dtype=float)
+    n = x.shape[0]
+    H = np.fft.rfft(x, axis=0)
+    f = np.fft.rfftfreq(n, 1 / fs)
+    w = 2 * np.pi * f / fs
+    f1, f2 = freqRange
+    out = H.copy()
+    for edge, (lo, hi) in (('low', (0.01, 0.2)), ('high', (0.9, 0.99))):
+        band = (f >= f1 + lo * (f2 - f1)) & (f <= f1 + hi * (f2 - f1))
+        outside = f < f1 if edge == 'low' else f > f2
+        for c in range(H.shape[1]):
+            b, a = invfreqz(H[band, c], w[band], order, order)
+            out[outside, c] = ss.freqz(b, a, w[outside])[1]
+    return SignalObj(np.fft.irfft(out, n, axis=0), 'time', fs)
 
 
 def _harmonic_matrix(order, gain, phase):
@@ -1306,43 +1697,6 @@ def minimum_phase(signalObj):
                                                axis=0)), n=N, axis=0)
     newSignal = SignalObj(minPhase, 'time',
                           samplingRate=signalObj.samplingRate,
-def smooth_notches(signalObj, nthOct=3, threshold=3., squeeze=0.3):
-    """
-    Spectrum with its notches made shallower, for loudspeaker equalization,
-    by the "compare and squeeze" of ita_smooth_notches (after S. Mueller):
-    the magnitude is compared with its smoothing over 1 / nthOct octave
-    (smooth_frequency), every notch deeper than threshold dB below it is
-    taken from where the magnitude last crossed the smoothed one to where
-    it crosses it again, and there the ratio r of the two is raised to
-    squeeze, so that the notch keeps squeeze times its depth in dB. With
-    threshold 0 every bin below the smoothed curve is squeezed. The phase
-    is kept. Returns a SignalObj.
-    """
-    spectrum = np.array(signalObj.freqSignal, dtype=complex, ndmin=2)
-    smooth = np.array(smooth_frequency(signalObj, nthOct).freqSignal, dtype=complex, ndmin=2)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        ratio = np.abs(spectrum) / np.abs(smooth)
-    window = np.ones_like(ratio)
-    for ch in range(ratio.shape[1]):
-        r = ratio[:, ch]
-        if not threshold:
-            window[:, ch] = np.minimum(r, 1)
-            continue
-        notch = r < 10 ** (-abs(threshold) / 20)
-        notch[0] = notch[1]
-        edges = np.diff(notch.astype(int))
-        for s, e in zip(np.flatnonzero(edges == 1) + 1, np.flatnonzero(edges == -1)):
-            above = np.flatnonzero(r[:s] > 1)
-            start = above[-1] + 1 if above.size else 0
-            above = np.flatnonzero(r[e:] > 1)
-            stop = e + above[0] if above.size else r.size
-            window[start:stop, ch] = r[start:stop]
-    with np.errstate(divide='ignore', invalid='ignore'):
-        window = window ** -(1 - squeeze)
-    window[~np.isfinite(window)] = 1
-    newSignal = SignalObj(window * spectrum, 'freq',
-                          samplingRate=signalObj.samplingRate,
-                          numSamples=signalObj.numSamples,
                           signalType=signalObj.signalType,
                           freqMin=signalObj.freqMin,
                           freqMax=signalObj.freqMax,
@@ -1675,345 +2029,6 @@ def mls_deconvolution(response, order):
                           signalType='energy')
     newSignal.channels = cp.deepcopy(response.channels)
     return newSignal
-def dither(signal, bits=24, kind='tri', quiet=False, seed=None):
-    """
-    signal (full scale 1) with dither noise added before it is quantized to
-    bits bits, so that the quantization error becomes noise independent of
-    the signal, as ita_dither (Lipshitz, Wannamaker and Vanderkooy,
-    Quantization and dither: a theoretical survey, J. Audio Eng. Soc.
-    40(5), 1992). kind 'rect' is uniform over one step, 'tri' (triangular,
-    two steps wide) makes the mean and the power of the error independent
-    of the signal, and 'gauss' has a standard deviation of half a step. With
-    quiet, samples equal to zero get no dither.
-    """
-    rng = np.random.default_rng(seed)
-    x = np.asarray(signal.timeSignal, dtype=float)
-    step = 2.0 ** (1 - bits)
-    if kind == 'rect':
-        d = rng.uniform(-step / 2, step / 2, x.shape)
-    elif kind == 'tri':
-        d = rng.uniform(-step / 2, step / 2, x.shape) + rng.uniform(-step / 2, step / 2, x.shape)
-    elif kind == 'gauss':
-        d = rng.normal(0, step / 2, x.shape)
-    else:
-        raise ValueError("kind must be 'rect', 'tri' or 'gauss'.")
-    if quiet:
-        d[x == 0] = 0
-    return SignalObj(x + d, 'time', signal.samplingRate)
-
-
-def impulsive_noise(ir, excitation, noise_start, threshold=20):
-    """
-    Detection of an impulsive event during a sweep measurement, as
-    ita_impulsiveNoiseDetection: the part of the impulse response ir after
-    noise_start seconds, where it holds only noise, is convolved again with
-    the excitation (circularly, at the length of ir) to rebuild the
-    background noise of the recording, and L_max_rms = 20 lg(max |n| /
-    rms(n)) of that noise is compared with threshold (dB). Stationary noise
-    gives 12 to 14 dB.
-
-    Returns (detected, L_max_rms, background noise SignalObj).
-    """
-    h = np.asarray(ir.timeSignal[:, 0], dtype=float).copy()
-    h[:int(round(noise_start * ir.samplingRate))] = 0
-    x = np.asarray(excitation.timeSignal[:, 0], dtype=float)
-    n = np.fft.irfft(np.fft.rfft(h) * np.fft.rfft(x, h.size), h.size)
-    level = 20 * np.log10(np.abs(n).max() / np.sqrt(np.mean(n ** 2)))
-    return level > threshold, level, SignalObj(n, 'time', ir.samplingRate)
-
-
-def _log_crossfade(f, f0, f1):
-    # 0 below f0, 1 above f1, raised cosine on a logarithmic axis between.
-    with np.errstate(divide='ignore'):
-        u = np.clip(np.log(f / f0) / np.log(f1 / f0), 0, 1)
-    return 0.5 - 0.5 * np.cos(np.pi * np.nan_to_num(u))
-
-
-def invert_spectrum(signal, freqRange, minimum_phase=False):
-    """
-    Regularized inverse of the spectrum of signal, C = conj(H) / (|H|^2 +
-    eps) (Kirkeby, Rubak, Nelson and Farina, Design of cross-talk
-    cancellation networks by using fast deconvolution, 1999), with eps
-    negligible inside freqRange = [fmin, fmax] and half the largest |H|^2
-    outside it, crossfaded over half an octave, the rule of the
-    regularization of ImpulsiveResponse. With minimum_phase, the inverse
-    gets the minimum phase of its magnitude, as
-    ita_invert_spk_minphase_regularization.
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    n = x.shape[0]
-    H = np.fft.rfft(x, axis=0)
-    f = np.fft.rfftfreq(n, 1 / signal.samplingRate)
-    fmin, fmax = freqRange
-    outside = 1 - _log_crossfade(f, fmin / np.sqrt(2), fmin) \
-        + _log_crossfade(f, fmax, fmax * np.sqrt(2))
-    eps = (1e-10 + outside[:, None]) * (np.abs(H) ** 2).max(axis=0) / 2
-    C = np.conj(H) / (np.abs(H) ** 2 + eps)
-    if minimum_phase:
-        # Homomorphic: fold the real cepstrum of log |C| onto positive times.
-        c = np.fft.irfft(np.log(np.abs(C)), n, axis=0)
-        fold = np.zeros(n)
-        fold[0] = 1
-        fold[1:(n + 1) // 2] = 2
-        if n % 2 == 0:
-            fold[n // 2] = 1
-        C = np.exp(np.fft.rfft(c * fold[:, None], axis=0))
-    return SignalObj(np.fft.irfft(C, n, axis=0), 'time', signal.samplingRate)
-
-
-def merge_near_far(near, far, crossover, order=4, port=None, port_ratio=1.):
-    """
-    Loudspeaker response from a near-field measurement below crossover (Hz)
-    and a far-field one above it, as
-    ita_add_nearfield_farfield_measurements (Keele, Low-frequency
-    loudspeaker assessment by nearfield sound-pressure measurement, J.
-    Audio Eng. Soc. 22(3), 1974). The near-field response, with the port
-    one times port_ratio (port radius over diaphragm radius) added for a
-    vented box, is delayed to the far-field one (find_delay) and scaled to
-    its level over the third octave around the crossover, and the two are
-    crossfaded with the power-complementary weights 1 / (1 + (f/fc)^(2
-    order)) and its complement, which add up to 1.
-    """
-    fs = far.samplingRate
-    m = np.asarray(near.timeSignal[:, 0], dtype=float)
-    if port is not None:
-        m = m + port_ratio * np.asarray(port.timeSignal[:, 0], dtype=float)
-    x = np.asarray(far.timeSignal[:, 0], dtype=float)
-    n = x.size
-    f = np.fft.rfftfreq(n, 1 / fs)
-    lag = np.argmax(ss.correlate(x, m, mode='full', method='fft')) - (m.size - 1)
-    M = np.fft.rfft(m, n) * np.exp(-2j * np.pi * f * lag / fs)
-    X = np.fft.rfft(x)
-    band = (f >= crossover * 2 ** (-1 / 6)) & (f <= crossover * 2 ** (1 / 6))
-    M *= np.sqrt(np.sum(np.abs(X[band]) ** 2) / np.sum(np.abs(M[band]) ** 2))
-    low = 1 / (1 + (f / crossover) ** (2 * order))
-    return SignalObj(np.fft.irfft(low * M + (1 - low) * X, n), 'time', fs)
-def multiple_sweep_excitation(sweep, numSources, delay, tail=0.):
-    """
-    Excitation of the multiple exponential sweep method (Majdak, Balazs and
-    Laback, Multiple exponential sweep method for fast measurement of
-    head-related transfer functions, J. Audio Eng. Soc. 55(7/8), 2007), the
-    interleaved and MIMO measurements of the ITA-Toolbox: channel k plays
-    sweep delayed by k delay seconds, with tail seconds of silence at the
-    end for the last responses. delay must exceed the length of the
-    impulse responses plus the advance of the harmonics that matter.
-    """
-    fs = sweep.samplingRate
-    s = np.asarray(sweep.timeSignal[:, 0], dtype=float)
-    d = int(round(delay * fs))
-    x = np.zeros((s.size + (numSources - 1) * d + int(round(tail * fs)), numSources))
-    for k in range(numSources):
-        x[k * d:k * d + s.size, k] = s
-    return SignalObj(x, 'time', fs, freqMin=sweep.freqMin, freqMax=sweep.freqMax)
-
-
-def multiple_sweep_irs(recording, sweep, numSources, delay, irLength,
-                       pretime=0.005, regularization=True):
-    """
-    Impulse responses of each source to every input channel from a
-    recording of multiple_sweep_excitation: the recording is deconvolved
-    with the single sweep by ImpulsiveResponse, regularized between the
-    freqMin and freqMax of sweep unless regularization is False, and the
-    response of source k is cut from pretime seconds before k delay,
-    irLength seconds long, so that the onset of the band-limited impulse is
-    kept. The regularization limits the band and so spreads each impulse
-    in time, and part of it falls in the windows of the other sources
-    (about 1 % with the default band); without it the division is exact
-    but raises the noise outside the band of the sweep. Returns one
-    SignalObj per source, with one channel per input channel.
-    """
-    fs = recording.samplingRate
-    n = recording.timeSignal.shape[0]
-    s = np.zeros(n)
-    s[:sweep.timeSignal.shape[0]] = sweep.timeSignal[:, 0]
-    excitation = SignalObj(s, 'time', fs, freqMin=sweep.freqMin, freqMax=sweep.freqMax)
-    ir = ImpulsiveResponse(excitation, recording, 'linear', regularization=regularization)
-    h = np.asarray(ir.IR.timeSignal, dtype=float)
-    d, m = int(round(delay * fs)), int(round(irLength * fs))
-    h = np.roll(h, int(round(pretime * fs)), axis=0)
-    return [SignalObj(h[k * d:k * d + m], 'time', fs) for k in range(numSources)]
-
-
-def triggered_average(recording, threshold, duration, pretime=0., channel=0):
-    """
-    Average of the events of a triggered measurement (e.g. impact hammer),
-    as ita_measurement_trigger: an event starts where the trigger channel
-    first exceeds threshold dB re full scale after the previous event, and
-    is cut from pretime seconds before that sample, duration seconds long,
-    in every channel. Returns (mean SignalObj, list of the events).
-    """
-    fs = recording.samplingRate
-    x = np.asarray(recording.timeSignal, dtype=float)
-    pre, m = int(round(pretime * fs)), int(round(duration * fs))
-    above = np.flatnonzero(np.abs(x[:, channel]) > 10 ** (threshold / 20))
-    runs, end = [], -1
-    for i in above:
-        if i >= end and i - pre >= 0 and i - pre + m <= x.shape[0]:
-            runs.append(SignalObj(x[i - pre:i - pre + m], 'time', fs))
-            end = i - pre + m
-    if not runs:
-        raise ValueError('No event above the threshold.')
-    mean = np.mean([r.timeSignal for r in runs], axis=0)
-    return SignalObj(mean, 'time', fs), runs
-def pitch_detection(signal, fmin=10., fmax=None, blockSize=None, overlap=0.,
-                    overtones=5, maxPitches=1, minDistance=10.,
-                    minConfidence=0.1, fftDegree=16):
-    """
-    Pitch of every block of the first channel by the cepstrum biased
-    harmonic product spectrum of ita_pitch_detection: the magnitude
-    spectrum of the Hann windowed block (zero padded to 2**fftDegree) is
-    multiplied by itself decimated by 2 to overtones + 1 (the harmonic
-    product spectrum, Noll 1969) and by the magnitude of the real cepstrum
-    at the quefrency of each bin. The highest peak between fmin and fmax is
-    the pitch; with maxPitches > 1 the band of minDistance Hz around each
-    peak is cleared and the next is taken. The confidence of a pitch is the
-    share of the energy of the harmonic product spectrum within that band,
-    times the number of pitches found (at most 1); pitches below
-    minConfidence are nan.
-
-    Returns (pitch, confidence), arrays of shape (maxPitches, blocks), and
-    the time (s) of the start of each block.
-    """
-    fs = signal.samplingRate
-    x = np.asarray(signal.timeSignal[:, 0], dtype=float)
-    size = blockSize or x.size
-    hop = max(1, int(round(size * (1 - overlap))))
-    n = max(2 ** fftDegree, size)
-    f = np.fft.rfftfreq(n, 1 / fs)
-    band = np.flatnonzero((f > fmin) & (f < (fmax or fs / 2)))
-    half = max(1, int(np.ceil(minDistance / f[1] / 2)))
-    starts = np.arange(0, x.size, hop)
-    pitch = np.full((maxPitches, starts.size), np.nan)
-    confidence = np.zeros((maxPitches, starts.size))
-    for b, s in enumerate(starts):
-        block = x[s:s + size]
-        block = np.pad(block * np.hanning(block.size), (0, n - block.size))
-        X = np.abs(np.fft.rfft(block))
-        hps = X.copy()
-        for a in range(2, overtones + 2):
-            down = X[::a]
-            hps[:down.size] *= down
-            hps[down.size:] = 0
-        with np.errstate(divide='ignore'):
-            ceps = np.abs(np.fft.irfft(np.log(np.maximum(X, 1e-300)), n))
-        bias = np.zeros_like(hps)
-        bias[band] = ceps[np.minimum(n // band, n - 1)]
-        score, energy = hps * bias, hps.copy()
-        total = np.sum(energy[band] ** 2)
-        found = 0
-        for p in range(maxPitches):
-            k = band[np.argmax(score[band])]
-            if score[k] <= 0 or total == 0:
-                break
-            near = slice(max(band[0], k - half), min(band[-1], k + half) + 1)
-            pitch[p, b] = f[k]
-            confidence[p, b] = np.sum(energy[near] ** 2) / total
-            score[near] = 0
-            energy[near] = 0
-            found += 1
-        confidence[:, b] = np.minimum(confidence[:, b] * max(found, 1), 1)
-    pitch[confidence < minConfidence] = np.nan
-    confidence[confidence < minConfidence] = 0
-    return pitch, confidence, starts / fs
-
-
-def wiener_hopf(signal, invert=False):
-    """
-    Wiener-Hopf factorization of every channel into a causal and an
-    anticausal part whose spectra multiply to the spectrum of signal, by
-    splitting the complex cepstrum (log magnitude and unwrapped phase) at
-    quefrency zero, half of the zero and middle quefrencies to each, as
-    ita_wiener_hopf_factorization. With invert, the factors of the
-    inverse spectrum are returned. Returns (plus, minus).
-    """
-    x = np.asarray(signal.timeSignal, dtype=float)
-    n = x.shape[0]
-    m = n // 2
-    X = np.fft.fft(x, axis=0)
-    phase = np.unwrap(np.angle(X[:m + 1]), axis=0)
-    phase = np.vstack([phase, -phase[1:(n + 1) // 2][::-1]])
-    c = np.fft.ifft((-1 if invert else 1) * (np.log(np.abs(X)) + 1j * phase), axis=0)
-    plus, minus = np.zeros_like(c), np.zeros_like(c)
-    plus[0] = minus[0] = c[0] / 2
-    plus[1:m] = c[1:m]
-    minus[n - m + 1:] = c[n - m + 1:]
-    if n % 2 == 0:
-        plus[m] = minus[m] = c[m] / 2
-    out = [np.fft.ifft(np.exp(np.fft.fft(q, axis=0)), axis=0).real for q in (plus, minus)]
-    return tuple(SignalObj(o, 'time', signal.samplingRate) for o in out)
-
-
-def normxcorr2(template, image):
-    """
-    Normalized two-dimensional cross-correlation of template with image,
-    as MATLAB's normxcorr2 that ita_normxcorr2 applies to array data: at
-    every lag of the full correlation (shape image + template - 1), the
-    correlation of the zero-mean template with the part of image under it,
-    divided by both standard deviations (Lewis, Fast normalized
-    cross-correlation, Vision Interface 1995). Values lie in [-1, 1]; lags
-    where the image is constant give 0.
-    """
-    t = np.asarray(template, dtype=float)
-    a = np.asarray(image, dtype=float)
-    t = t - t.mean()
-    ones = np.ones_like(t)
-    num = ss.fftconvolve(a, t[::-1, ::-1])
-    s1 = ss.fftconvolve(a, ones)
-    s2 = ss.fftconvolve(a ** 2, ones)
-    var_a = np.maximum(s2 - s1 ** 2 / t.size, 0)
-    den = np.sqrt(var_a * np.sum(t ** 2))
-    with np.errstate(divide='ignore', invalid='ignore'):
-        r = np.where(den > 1e-12 * den.max(), num / den, 0)
-    return np.clip(r, -1, 1)
-
-
-def lifter(signal, n=None, alpha=0.):
-    """
-    Low-pass lifter, as ita_lifter: the complex cepstrum of each channel
-    (cepstrum, which removes the integer delay) is multiplied by a Tukey
-    window of 2 n + 1 quefrencies centred on zero (alpha 0 rectangular,
-    1 Hann) and transformed back with the delay (icepstrum), which smooths
-    the log magnitude and the phase of the spectrum together. n defaults
-    to a quarter of the length; from half the length on nothing is done.
-
-    >>> smooth = pytta.lifter(ir, 64, 0.5)
-    """
-    N = signal.numSamples
-    n = int(np.ceil(N / 4)) if n is None else int(n)
-    if n >= np.ceil(N / 2):
-        warn('lifter: the window is too long, nothing is done.')
-        return _cepstrum_signal(signal, np.asarray(signal.timeSignal, dtype=float))
-    win = np.zeros(N)
-    win[:2 * n + 1] = ss.windows.tukey(2 * n + 1, alpha)
-    win = np.roll(win, -n)
-    c, delay = cepstrum(signal)
-    lifted = _cepstrum_signal(c, np.asarray(c.timeSignal, dtype=float) * win[:, None])
-    return icepstrum(lifted, delay)
-def extrapolate(signal, freqRange, order=4):
-    """
-    Spectrum outside freqRange = [f1, f2] (Hz) replaced by IIR models of
-    order order fitted with invfreqz near each end, as ita_extrapolate:
-    the low model on f1 + (0.01 to 0.2)(f2 - f1), used below f1, and the
-    high model on f1 + (0.9 to 0.99)(f2 - f1), used above f2, the bands
-    of the ITA-Toolbox. A pure delay should be removed first (time_shift),
-    since it is not a low-order model.
-    """
-    fs = signal.samplingRate
-    x = np.asarray(signal.timeSignal, dtype=float)
-    n = x.shape[0]
-    H = np.fft.rfft(x, axis=0)
-    f = np.fft.rfftfreq(n, 1 / fs)
-    w = 2 * np.pi * f / fs
-    f1, f2 = freqRange
-    out = H.copy()
-    for edge, (lo, hi) in (('low', (0.01, 0.2)), ('high', (0.9, 0.99))):
-        band = (f >= f1 + lo * (f2 - f1)) & (f <= f1 + hi * (f2 - f1))
-        outside = f < f1 if edge == 'low' else f > f2
-        for c in range(H.shape[1]):
-            b, a = invfreqz(H[band, c], w[band], order, order)
-            out[outside, c] = ss.freqz(b, a, w[outside])[1]
-    return SignalObj(np.fft.irfft(out, n, axis=0), 'time', fs)
-
 
 def fft_degree(*args,**kwargs):
     """

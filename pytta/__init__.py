@@ -184,6 +184,7 @@ from .functions import read_wav, write_wav, merge, split, \
     dither, impulsive_noise, invert_spectrum, merge_near_far
     multiple_sweep_excitation, multiple_sweep_irs, triggered_average
     pitch_detection, wiener_hopf, normxcorr2
+    group_delay, coherence, cepstrum, icepstrum, mls_deconvolution, lifter
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -296,6 +297,7 @@ __all__ = [  # Apps
            'pitch_detection',
            'wiener_hopf',
            'normxcorr2',
+           'lifter',
            'save',
            'load',
            'weighting',

@@ -79,3 +79,4 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.pitch_detection
 .. autofunction:: pytta.wiener_hopf
 .. autofunction:: pytta.normxcorr2
+.. autofunction:: pytta.lifter

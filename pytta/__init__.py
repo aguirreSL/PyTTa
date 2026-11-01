@@ -170,6 +170,8 @@ from .functions import read_wav, write_wav, merge, split, \
     butterworth, notch, peak_eq
     plot_bars, plot_spectrogram, plot_waterfall, SPL,\
     psd, interpolate_spectrum, extrapolate_low
+    plot_bars, plot_spectrogram, plot_waterfall, SPL,\
+    read_audio, write_audio, read_blockwise, write_txt, read_txt
 
 # Must go on v0.1.0 (DEPRECATED)
 from .functions import fft_degree
@@ -251,6 +253,11 @@ __all__ = [  # Apps
            'psd',
            'interpolate_spectrum',
            'extrapolate_low',
+           'read_audio',
+           'write_audio',
+           'read_blockwise',
+           'write_txt',
+           'read_txt',
            'save',
            'load',
            'weighting',

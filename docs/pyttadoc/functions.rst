@@ -50,3 +50,8 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.psd
 .. autofunction:: pytta.interpolate_spectrum
 .. autofunction:: pytta.extrapolate_low
+.. autofunction:: pytta.read_audio
+.. autofunction:: pytta.write_audio
+.. autofunction:: pytta.read_blockwise
+.. autofunction:: pytta.write_txt
+.. autofunction:: pytta.read_txt

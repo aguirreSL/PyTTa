@@ -69,3 +69,7 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.bark_warping
 .. autofunction:: pytta.warp
 .. autofunction:: pytta.warp_zpk
+.. autofunction:: pytta.dither
+.. autofunction:: pytta.impulsive_noise
+.. autofunction:: pytta.invert_spectrum
+.. autofunction:: pytta.merge_near_far

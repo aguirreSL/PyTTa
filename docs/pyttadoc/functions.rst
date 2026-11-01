@@ -81,3 +81,4 @@ The functions of this module are also available from the top level, e.g.
 .. autofunction:: pytta.normxcorr2
 .. autofunction:: pytta.lifter
 .. autofunction:: pytta.smooth_notches
+.. autofunction:: pytta.extrapolate

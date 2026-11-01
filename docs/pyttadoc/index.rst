@@ -77,6 +77,8 @@ Modules:
         loudness (ISO 532-1), sharpness (DIN 45692), roughness (Daniel
         and Weber 1997), fluctuation strength (Osses et al. 2016) and
         tonality (Aures 1985) of a sound pressure signal;
+    * pytta.iso532_2:
+        loudness of stationary sounds by the Moore-Glasberg method (ISO 532-2);
 
 .. toctree::
    classes/index
@@ -93,4 +95,5 @@ Modules:
    din45681
    vbap
    ambisonics
+   iso532_2
    properties

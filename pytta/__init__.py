@@ -92,6 +92,8 @@ Modules:
         loudness (ISO 532-1), sharpness (DIN 45692), roughness (Daniel
         and Weber 1997), fluctuation strength (Osses et al. 2016) and
         tonality (Aures 1985) of a sound pressure signal;
+    * pytta.iso532_2:
+        loudness of stationary sounds by the Moore-Glasberg method (ISO 532-2);
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -147,6 +149,7 @@ from . import sofa
 from . import din45681
 from . import vbap
 from . import ambisonics
+from . import iso532_2
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -186,6 +189,7 @@ __all__ = [  # Apps
            'din45681',
            'vbap',
            'ambisonics',
+           'iso532_2',
            'rooms',
 
            # Functions

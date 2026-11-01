@@ -81,6 +81,8 @@ Modules:
         loudness of stationary sounds by the Moore-Glasberg method (ISO 532-2);
     * pytta.absorbers:
         surface impedance and absorption of layered absorbers;
+    * pytta.analytic:
+        analytic sound fields of point sources, plane waves and a sphere;
 
 .. toctree::
    classes/index
@@ -99,4 +101,5 @@ Modules:
    ambisonics
    iso532_2
    absorbers
+   analytic
    properties

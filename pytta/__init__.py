@@ -96,6 +96,8 @@ Modules:
         loudness of stationary sounds by the Moore-Glasberg method (ISO 532-2);
     * pytta.absorbers:
         surface impedance and absorption of layered absorbers;
+    * pytta.analytic:
+        analytic sound fields of point sources, plane waves and a sphere;
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -153,6 +155,7 @@ from . import vbap
 from . import ambisonics
 from . import iso532_2
 from . import absorbers
+from . import analytic
 
 from .functions import read_wav, write_wav, merge, split, \
     list_devices, print_devices, get_device_from_user,\
@@ -201,6 +204,7 @@ __all__ = [  # Apps
            'ambisonics',
            'iso532_2',
            'absorbers',
+           'analytic',
            'rooms',
 
            # Functions

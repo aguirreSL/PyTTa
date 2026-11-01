@@ -98,6 +98,9 @@ Modules:
         analytic sound fields of point sources, plane waves and a sphere;
     * pytta.fourpole:
         four-pole matrices of lumped elements;
+    * pytta.e2611:
+        normal incidence sound transmission in a four-microphone tube
+        (ASTM E2611);
 
 
 You can find usage examples in the toolbox's examples folder.
@@ -157,6 +160,7 @@ from . import iso532_2
 from . import absorbers
 from . import analytic
 from . import fourpole
+from . import e2611
 
 from .functions import (
     read_wav, write_wav, merge, split, list_devices, print_devices,
@@ -214,6 +218,7 @@ __all__ = [  # Apps
            'absorbers',
            'analytic',
            'fourpole',
+           'e2611',
            'rooms',
 
            # Functions

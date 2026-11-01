@@ -101,4 +101,5 @@ Modules:
    absorbers
    analytic
    fourpole
+   e2611
    properties
